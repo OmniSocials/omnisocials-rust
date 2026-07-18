@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::Error;
-use crate::resources::{Accounts, Analytics, Folders, Locations, Media, Posts, Webhooks};
+use crate::resources::{Accounts, Analytics, Audio, Folders, Locations, Media, Posts, Webhooks};
 
 /// Crate version, used in the `User-Agent` header.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -205,6 +205,11 @@ impl Client {
     /// Instagram location tagging: search, validate.
     pub fn locations(&self) -> Locations<'_> {
         Locations { client: self }
+    }
+
+    /// Instagram Reels licensed audio (Meta catalog): search.
+    pub fn audio(&self) -> Audio<'_> {
+        Audio { client: self }
     }
 
     /// Webhook endpoint management: list, get, create, update, delete,

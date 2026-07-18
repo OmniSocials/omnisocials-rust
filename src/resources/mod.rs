@@ -3,6 +3,7 @@
 
 mod accounts;
 mod analytics;
+mod audio;
 mod folders;
 mod locations;
 mod media;
@@ -11,6 +12,7 @@ mod webhooks;
 
 pub use accounts::Accounts;
 pub use analytics::Analytics;
+pub use audio::Audio;
 pub use folders::Folders;
 pub use locations::Locations;
 pub use media::Media;
