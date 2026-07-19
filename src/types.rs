@@ -424,6 +424,53 @@ pub struct BestTimesParams {
     pub timezone: Option<String>,
 }
 
+// ─── Inbox ───────────────────────────────────────────────────────────────────
+
+/// Query for `GET /inbox/conversations`.
+///
+/// The endpoint is cursor-paginated: read `pagination.next_cursor` from the
+/// response and pass it back as [`cursor`](ListConversationsParams::cursor) to
+/// fetch the next page (stop when `pagination.has_more` is `false`).
+#[derive(Debug, Clone, Default)]
+pub struct ListConversationsParams {
+    /// Restrict to one platform: `"instagram"`, `"facebook"`, or `"linkedin"`.
+    pub platform: Option<String>,
+    /// Conversation type: `"dm"`, `"comment"`, or `"mention"`.
+    pub r#type: Option<String>,
+    /// When `true`, only return conversations that have unread messages.
+    pub unread: Option<bool>,
+    /// Max conversations to return (1-100).
+    pub limit: Option<u32>,
+    /// Opaque cursor from a previous page's `pagination.next_cursor`.
+    pub cursor: Option<String>,
+}
+
+/// Query for `GET /inbox/conversations/:id/messages`.
+///
+/// Cursor-paginated with the same `next_cursor` / `has_more` / `limit`
+/// pagination shape as [`ListConversationsParams`].
+#[derive(Debug, Clone, Default)]
+pub struct GetMessagesParams {
+    /// Max messages to return.
+    pub limit: Option<u32>,
+    /// Opaque cursor from a previous page's `pagination.next_cursor`.
+    pub cursor: Option<String>,
+}
+
+/// Body for `POST /inbox/conversations/:id/reply`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ReplyParams {
+    /// The reply text. Required.
+    pub text: String,
+    /// Public URL of a single attachment to send with the reply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachment_url: Option<String>,
+    /// Attachment kind: `"image"`, `"video"`, `"audio"`, or `"file"`. Pair
+    /// with `attachment_url`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachment_type: Option<String>,
+}
+
 // ─── Webhooks ────────────────────────────────────────────────────────────────
 
 /// Body for `POST /webhooks`.

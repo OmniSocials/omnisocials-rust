@@ -49,8 +49,8 @@ pub use client::{Client, ClientBuilder, VERSION};
 pub use error::Error;
 pub use types::{
     AccountAnalyticsParams, AnalyticsOverviewParams, BestTimesParams, CheckMediaParams, Content,
-    CreateFolderParams, CreatePostParams, CreateWebhookParams, ListMediaParams, ListPostsParams,
-    MediaRefs, RecentPlatformPostsParams, UpdateFolderParams, UpdateMediaParams, UpdatePostParams,
-    UpdateWebhookParams, UploadMediaFromBase64Params, UploadMediaFromUrlParams, UploadMediaParams,
-    UserTag,
+    CreateFolderParams, CreatePostParams, CreateWebhookParams, GetMessagesParams,
+    ListConversationsParams, ListMediaParams, ListPostsParams, MediaRefs, RecentPlatformPostsParams,
+    ReplyParams, UpdateFolderParams, UpdateMediaParams, UpdatePostParams, UpdateWebhookParams,
+    UploadMediaFromBase64Params, UploadMediaFromUrlParams, UploadMediaParams, UserTag,
 };

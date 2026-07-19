@@ -13,7 +13,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::Error;
-use crate::resources::{Accounts, Analytics, Audio, Folders, Locations, Media, Posts, Webhooks};
+use crate::resources::{
+    Accounts, Analytics, Audio, Folders, Inbox, Locations, Media, Posts, Webhooks,
+};
 
 /// Crate version, used in the `User-Agent` header.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -217,6 +219,11 @@ impl Client {
     /// [`crate::webhooks::verify_signature`].)
     pub fn webhooks(&self) -> Webhooks<'_> {
         Webhooks { client: self }
+    }
+
+    /// Social Inbox: list_conversations, get_messages, mark_read, reply.
+    pub fn inbox(&self) -> Inbox<'_> {
+        Inbox { client: self }
     }
 
     /// `GET /health` (no scopes required).
