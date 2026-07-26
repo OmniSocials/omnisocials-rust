@@ -4,8 +4,9 @@
 use std::collections::HashMap;
 
 use omnisocials::{
-    CheckMediaParams, Content, CreatePostParams, MediaRefs, UpdateFolderParams, UpdateMediaParams,
-    UpdatePostParams, UpdateWebhookParams, UserTag,
+    CheckMediaParams, Content, CreateHashtagSetParams, CreatePostParams, MediaEntry, MediaRefs,
+    UpdateFolderParams, UpdateHashtagSetParams, UpdateMediaParams, UpdatePostParams,
+    UpdateWebhookParams, UserTag,
 };
 use serde_json::{json, Value};
 
@@ -81,6 +82,30 @@ fn media_refs_per_platform_serializes_as_object() {
 }
 
 #[test]
+fn media_entries_serialize_with_alt_text() {
+    // A plain entry and an alt-carrying entry mix in one shared list.
+    let refs: MediaRefs = vec![
+        MediaEntry::from("https://example.com/plain.jpg"),
+        MediaEntry::Url {
+            url: "https://example.com/harbor.jpg".into(),
+            alt: Some("A sailboat at sunrise".into()),
+        },
+    ]
+    .into();
+    assert_eq!(
+        serde_json::to_value(&refs).unwrap(),
+        json!([
+            "https://example.com/plain.jpg",
+            {"url": "https://example.com/harbor.jpg", "alt": "A sailboat at sunrise"}
+        ])
+    );
+
+    // Id entries drop a None alt (plain object with just the id).
+    let ids: MediaRefs = vec![MediaEntry::Id { id: "42".into(), alt: None }].into();
+    assert_eq!(serde_json::to_value(&ids).unwrap(), json!([{"id": "42"}]));
+}
+
+#[test]
 fn update_post_params_default_is_empty_object() {
     let value = serde_json::to_value(UpdatePostParams::default()).unwrap();
     assert_eq!(value, json!({}));
@@ -140,6 +165,43 @@ fn check_media_params_drop_none() {
     })
     .unwrap();
     assert_eq!(by_size, json!({"size_bytes": 300_000_000u64, "mime": "video/quicktime"}));
+}
+
+#[test]
+fn hashtag_set_params_serialize_both_shapes() {
+    // Create: hashtags as a list of tags.
+    let created = serde_json::to_value(CreateHashtagSetParams {
+        name: "Launch".into(),
+        hashtags: vec!["saas", "startup"].into(),
+    })
+    .unwrap();
+    assert_eq!(created, json!({"name": "Launch", "hashtags": ["saas", "startup"]}));
+
+    // Update: hashtags as one string; None fields are dropped.
+    let updated = serde_json::to_value(UpdateHashtagSetParams {
+        name: None,
+        hashtags: Some("#a #b".into()),
+    })
+    .unwrap();
+    assert_eq!(updated, json!({"hashtags": "#a #b"}));
+}
+
+#[test]
+fn create_post_params_hashtag_fields_serialize() {
+    let params = CreatePostParams {
+        content: "Launch day!".into(),
+        channels: Some(vec!["instagram".into(), "x".into()]),
+        hashtag_set: Some("Launch".into()),
+        hashtag_placement: Some("first_comment".into()),
+        hashtag_platforms: Some(vec!["instagram".into()]),
+        ..Default::default()
+    };
+    let value = serde_json::to_value(&params).unwrap();
+    assert_eq!(value["hashtag_set"], "Launch");
+    assert_eq!(value["hashtag_placement"], "first_comment");
+    assert_eq!(value["hashtag_platforms"], json!(["instagram"]));
+    // Unset hashtag_set_id is absent, not null.
+    assert!(value.get("hashtag_set_id").is_none());
 }
 
 #[test]

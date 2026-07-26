@@ -50,8 +50,51 @@ impl From<HashMap<String, String>> for Content {
     }
 }
 
+/// One media entry, optionally carrying alt text (accessibility description,
+/// max 1500 chars). Alt text is delivered to Mastodon (media description),
+/// Bluesky (embed alt), X (photo/GIF media metadata), and Pinterest (pin
+/// alt_text fallback). Plain and alt-carrying entries can be mixed in the
+/// same list.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum MediaEntry {
+    /// A plain public URL (in `media_urls`) or Media Library id (in `media_ids`).
+    Plain(String),
+    /// A public URL plus alt text; serializes as `{"url": ..., "alt": ...}`.
+    /// Use in `media_urls`.
+    Url {
+        /// The public media URL.
+        url: String,
+        /// Alt text / accessibility description (max 1500 chars).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        alt: Option<String>,
+    },
+    /// A Media Library id plus alt text; serializes as `{"id": ..., "alt": ...}`.
+    /// Use in `media_ids`.
+    Id {
+        /// The Media Library id.
+        id: String,
+        /// Alt text / accessibility description (max 1500 chars).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        alt: Option<String>,
+    },
+}
+
+impl From<&str> for MediaEntry {
+    fn from(value: &str) -> Self {
+        MediaEntry::Plain(value.to_owned())
+    }
+}
+
+impl From<String> for MediaEntry {
+    fn from(value: String) -> Self {
+        MediaEntry::Plain(value)
+    }
+}
+
 /// Media attachments: either a list shared by all platforms, or a
-/// per-platform map (e.g. `{"instagram": ["id1"], "x": ["id2"]}`).
+/// per-platform map (e.g. `{"instagram": ["id1"], "x": ["id2"]}`). The
+/// `*Entries` variants accept [`MediaEntry`] values for per-media alt text.
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum MediaRefs {
@@ -59,6 +102,10 @@ pub enum MediaRefs {
     Shared(Vec<String>),
     /// Per-platform media lists.
     PerPlatform(HashMap<String, Vec<String>>),
+    /// The same media for every platform, with optional per-media alt text.
+    SharedEntries(Vec<MediaEntry>),
+    /// Per-platform media lists with optional per-media alt text.
+    PerPlatformEntries(HashMap<String, Vec<MediaEntry>>),
 }
 
 impl From<Vec<String>> for MediaRefs {
@@ -76,6 +123,18 @@ impl From<Vec<&str>> for MediaRefs {
 impl From<HashMap<String, Vec<String>>> for MediaRefs {
     fn from(value: HashMap<String, Vec<String>>) -> Self {
         MediaRefs::PerPlatform(value)
+    }
+}
+
+impl From<Vec<MediaEntry>> for MediaRefs {
+    fn from(value: Vec<MediaEntry>) -> Self {
+        MediaRefs::SharedEntries(value)
+    }
+}
+
+impl From<HashMap<String, Vec<MediaEntry>>> for MediaRefs {
+    fn from(value: HashMap<String, Vec<MediaEntry>>) -> Self {
+        MediaRefs::PerPlatformEntries(value)
     }
 }
 
@@ -107,10 +166,12 @@ pub struct CreatePostParams {
     /// `create_and_publish` (which publishes immediately).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduled_at: Option<String>,
-    /// Media Library ids, either shared or a per-platform map.
+    /// Media Library ids, either shared or a per-platform map. Use
+    /// [`MediaEntry::Id`] entries for per-media alt text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_ids: Option<MediaRefs>,
-    /// Public media URLs, either shared or a per-platform map.
+    /// Public media URLs, either shared or a per-platform map. Use
+    /// [`MediaEntry::Url`] entries for per-media alt text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_urls: Option<MediaRefs>,
     /// Post type, e.g. `"post"`, `"story"`, `"reel"`.
@@ -140,6 +201,21 @@ pub struct CreatePostParams {
     /// Instagram user tags positioned on the image(s).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_tags: Option<Vec<UserTag>>,
+    /// Name of a saved hashtag set (case-insensitive). Applies the set once
+    /// at create time; tags already in a caption are skipped; Instagram's
+    /// 30-hashtag cap returns error code `hashtag_limit_exceeded`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hashtag_set: Option<String>,
+    /// Id of a saved hashtag set to apply at create time (see `hashtag_set`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hashtag_set_id: Option<String>,
+    /// Where the hashtags go: `"caption_append"` (default) or
+    /// `"first_comment"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hashtag_placement: Option<String>,
+    /// Restrict the hashtags to a subset of `channels`. Omit for all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hashtag_platforms: Option<Vec<String>>,
     /// Pinterest options (e.g. `json!({"board_id": "...", "title": "..."})`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinterest: Option<Value>,
@@ -164,7 +240,8 @@ pub struct CreatePostParams {
     /// X (Twitter) options. Provide 2-25 `thread_parts` (each with `text`,
     /// max 280 chars, and optional `media_ids`/`media_urls`, max 4) to
     /// publish a thread; also supports `reply_settings`, `paid_partnership`,
-    /// `made_with_ai`.
+    /// `made_with_ai`. Thread-part media entries accept `{"url"|"id": ...,
+    /// "alt": ...}` objects for per-media alt text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x: Option<Value>,
     /// Bluesky options. Same `thread_parts` shape as `x` (300 chars per part).
@@ -194,10 +271,12 @@ pub struct UpdatePostParams {
     /// New platform identifiers list.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channels: Option<Vec<String>>,
-    /// New Media Library ids, either shared or a per-platform map.
+    /// New Media Library ids, either shared or a per-platform map. Use
+    /// [`MediaEntry::Id`] entries for per-media alt text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_ids: Option<MediaRefs>,
-    /// New public media URLs, either shared or a per-platform map.
+    /// New public media URLs, either shared or a per-platform map. Use
+    /// [`MediaEntry::Url`] entries for per-media alt text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_urls: Option<MediaRefs>,
     /// Post type, e.g. `"post"`, `"story"`, `"reel"`.
@@ -391,6 +470,69 @@ pub struct UpdateFolderParams {
     /// `null` (move to the top level), `None` leaves it untouched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<Option<String>>,
+}
+
+// ─── Hashtag sets ────────────────────────────────────────────────────────────
+
+/// The tags of a hashtag set: a list of tags, or one string of tags.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum Hashtags {
+    /// Individual tags.
+    List(Vec<String>),
+    /// One string of tags, e.g. `"#a #b"` or `"a, b"`.
+    Text(String),
+}
+
+impl Default for Hashtags {
+    fn default() -> Self {
+        Hashtags::List(Vec::new())
+    }
+}
+
+impl From<Vec<String>> for Hashtags {
+    fn from(value: Vec<String>) -> Self {
+        Hashtags::List(value)
+    }
+}
+
+impl From<Vec<&str>> for Hashtags {
+    fn from(value: Vec<&str>) -> Self {
+        Hashtags::List(value.into_iter().map(str::to_owned).collect())
+    }
+}
+
+impl From<&str> for Hashtags {
+    fn from(value: &str) -> Self {
+        Hashtags::Text(value.to_owned())
+    }
+}
+
+impl From<String> for Hashtags {
+    fn from(value: String) -> Self {
+        Hashtags::Text(value)
+    }
+}
+
+/// Body for `POST /hashtag-sets`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CreateHashtagSetParams {
+    /// Set name; posts match it case-insensitively via
+    /// [`CreatePostParams::hashtag_set`].
+    pub name: String,
+    /// The tags: a list, or one string of tags.
+    pub hashtags: Hashtags,
+}
+
+/// Body for `PATCH /hashtag-sets/:id`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct UpdateHashtagSetParams {
+    /// New set name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Replaces the FULL hashtag list: a list, or one string of tags.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hashtags: Option<Hashtags>,
 }
 
 // ─── Analytics ───────────────────────────────────────────────────────────────

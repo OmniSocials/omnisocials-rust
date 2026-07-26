@@ -117,6 +117,25 @@ client.posts().create_and_publish(CreatePostParams {
 }).await?;
 ```
 
+### Per-media alt text
+
+Every `media_urls` / `media_ids` entry accepts either a plain string or a `MediaEntry` with an `alt` accessibility description (max 1500 chars): `MediaEntry::Url` for `media_urls`, `MediaEntry::Id` for `media_ids`. Alt text is delivered to Mastodon (media description), Bluesky (embed alt), X (photos and GIFs), and Pinterest (pin alt text). Plain and alt-carrying entries can be mixed via `MediaEntry::Plain`, and the same shape works in per-platform maps and `thread_parts` media.
+
+```rust
+use omnisocials::{CreatePostParams, MediaEntry};
+
+client.posts().create(CreatePostParams {
+    content: "Sunrise over the harbor".into(),
+    channels: Some(vec!["mastodon".into(), "bluesky".into()]),
+    scheduled_at: Some("2026-08-01T09:00:00Z".into()),
+    media_urls: Some(vec![MediaEntry::Url {
+        url: "https://example.com/harbor.jpg".into(),
+        alt: Some("A small sailboat crossing a calm harbor at sunrise, sky in deep orange".into()),
+    }].into()),
+    ..Default::default()
+}).await?;
+```
+
 ### Post with platform-specific options
 
 Platform option blocks are free-form JSON; build them with `serde_json::json!`:
@@ -340,6 +359,43 @@ client.folders().update(id, UpdateFolderParams {
     parent_id: None, // Some(None) sends null: move to the top level
 }).await?;
 client.folders().delete(id).await?; // files move to root, subfolders move up
+```
+
+## Hashtag Sets
+
+Save reusable hashtag groups and apply them to posts at create time. Uses the `posts:read` / `posts:write` scopes.
+
+```rust
+use omnisocials::{CreateHashtagSetParams, UpdateHashtagSetParams};
+
+let set = client.hashtag_sets().create(CreateHashtagSetParams {
+    name: "Launch".into(),
+    hashtags: vec!["saas", "buildinpublic", "startup"].into(), // or one string: "#saas #buildinpublic #startup".into()
+}).await?;
+let id = set["data"]["id"].as_str().unwrap();
+println!("{}", set["data"]["preview"]); // "#saas #buildinpublic #startup"
+
+client.hashtag_sets().list().await?;
+client.hashtag_sets().get(id).await?;
+client.hashtag_sets().update(id, UpdateHashtagSetParams {
+    hashtags: Some(vec!["saas", "founder"].into()), // replaces the full list
+    ..Default::default()
+}).await?;
+client.hashtag_sets().delete(id).await?; // resolves to Value::Null (204)
+```
+
+Apply a set when creating a post with `hashtag_set` (the set name, case-insensitive) or `hashtag_set_id`. The set is applied once at create time and tags already in the caption are skipped. `hashtag_placement` is `"caption_append"` (default) or `"first_comment"`, and `hashtag_platforms` restricts the hashtags to a subset of the post's channels. Instagram's 30-hashtag cap returns error code `hashtag_limit_exceeded`.
+
+```rust
+client.posts().create(CreatePostParams {
+    content: "Launch day!".into(),
+    channels: Some(vec!["instagram".into(), "x".into()]),
+    scheduled_at: Some("2026-08-01T09:00:00Z".into()),
+    hashtag_set: Some("Launch".into()),
+    hashtag_placement: Some("first_comment".into()),
+    hashtag_platforms: Some(vec!["instagram".into()]),
+    ..Default::default()
+}).await?;
 ```
 
 ## Accounts
