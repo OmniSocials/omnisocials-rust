@@ -119,7 +119,7 @@ client.posts().create_and_publish(CreatePostParams {
 
 ### Per-media alt text
 
-Every `media_urls` / `media_ids` entry accepts either a plain string or a `MediaEntry` with an `alt` accessibility description (max 1500 chars): `MediaEntry::Url` for `media_urls`, `MediaEntry::Id` for `media_ids`. Alt text is delivered to Mastodon (media description), Bluesky (embed alt), X (photos and GIFs), and Pinterest (pin alt text). Plain and alt-carrying entries can be mixed via `MediaEntry::Plain`, and the same shape works in per-platform maps and `thread_parts` media.
+Every `media_urls` / `media_ids` entry accepts either a plain string or a `MediaEntry` with an `alt` accessibility description (max 1500 chars): `MediaEntry::Url` for `media_urls`, `MediaEntry::Id` for `media_ids`. Alt text is delivered to Mastodon (media description), Bluesky (embed alt), X (photos and GIFs), Pinterest (pin alt text), Instagram (images), and LinkedIn (images). Plain and alt-carrying entries can be mixed via `MediaEntry::Plain`, and the same shape works in per-platform maps and `thread_parts` media.
 
 ```rust
 use omnisocials::{CreatePostParams, MediaEntry};
@@ -204,7 +204,7 @@ client.posts().delete(id).await?;       // resolves to Value::Null (204)
 
 ### Recent platform posts
 
-Fetch recent posts live from the connected platform APIs, including content published outside OmniSocials. Useful for brand-new workspaces where `list` is empty. Requires the `analytics:read` scope.
+Fetch recent posts live from the connected platform APIs, including content published outside OmniSocials. Useful for brand-new workspaces where `list` is empty. Requires the `analytics:read` scope. Each record includes `duration_seconds` (integer, nullable): the video length in whole seconds where the platform reports it — currently TikTok and YouTube; `null` for images and for platforms that don't expose it.
 
 ```rust
 use omnisocials::RecentPlatformPostsParams;

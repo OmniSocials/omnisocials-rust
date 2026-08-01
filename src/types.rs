@@ -52,9 +52,9 @@ impl From<HashMap<String, String>> for Content {
 
 /// One media entry, optionally carrying alt text (accessibility description,
 /// max 1500 chars). Alt text is delivered to Mastodon (media description),
-/// Bluesky (embed alt), X (photo/GIF media metadata), and Pinterest (pin
-/// alt_text fallback). Plain and alt-carrying entries can be mixed in the
-/// same list.
+/// Bluesky (embed alt), X (photo/GIF media metadata), Pinterest (pin alt_text
+/// fallback), Instagram (images), and LinkedIn (images). Plain and
+/// alt-carrying entries can be mixed in the same list.
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum MediaEntry {
