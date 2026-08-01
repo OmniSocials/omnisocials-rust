@@ -79,4 +79,15 @@ impl Posts<'_> {
             .post_empty(&format!("/posts/{}/publish", encode_path_segment(id)))
             .await
     }
+
+    /// `POST /posts/:id/retry` - retry the failed platforms of a `failed` or
+    /// `warning` (partially failed) post, on the same post. Only the
+    /// platforms that failed are re-published; platforms that already
+    /// succeeded are never posted again. Asynchronous: a 200 means the retry
+    /// is queued - poll `get` for the outcome. Max 3 retries per platform.
+    pub async fn retry(&self, id: &str) -> Result<Value, Error> {
+        self.client
+            .post_empty(&format!("/posts/{}/retry", encode_path_segment(id)))
+            .await
+    }
 }

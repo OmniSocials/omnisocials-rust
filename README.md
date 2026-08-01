@@ -178,7 +178,7 @@ client.posts().create(CreatePostParams {
 
 On update, pass `json!({ "thread_parts": null })` to clear thread mode (revert to a single post); omit the field to leave the existing thread untouched.
 
-### List, get, update, publish, delete
+### List, get, update, publish, retry, delete
 
 ```rust
 use omnisocials::{ListPostsParams, UpdatePostParams};
@@ -196,8 +196,11 @@ client.posts().update(id, UpdatePostParams {
     ..Default::default()
 }).await?;
 client.posts().publish(id).await?;      // publish a draft/scheduled post now
+client.posts().retry(id).await?;        // retry only the failed platforms of a failed/warning post
 client.posts().delete(id).await?;       // resolves to Value::Null (204)
 ```
+
+`retry` re-publishes only the platforms that failed, on the same post; platforms that already succeeded are never posted again. It is asynchronous: a 200 means the retry is queued, so poll `get` for the outcome. Max 3 retries per platform.
 
 ### Recent platform posts
 
