@@ -49,12 +49,20 @@ impl Posts<'_> {
     }
 
     /// `POST /posts/create` - create a draft or scheduled post.
+    ///
+    /// When the post targets X and its text (or any thread part) contains a
+    /// URL, the response includes a top-level `warnings` array (sibling of
+    /// `data`) with a `x_url_post_credits` entry carrying `credits_required`
+    /// and `credits_balance`: X's link-post fee is passed through as prepaid
+    /// credits, debited at publish time (from 2026-08-14). Credits are
+    /// managed in the dashboard, not the API.
     pub async fn create(&self, params: CreatePostParams) -> Result<Value, Error> {
         self.client.post_json("/posts/create", &params).await
     }
 
     /// `POST /posts/create-and-publish` - create a post and publish it
-    /// immediately (any `scheduled_at` is ignored).
+    /// immediately (any `scheduled_at` is ignored). See [`Self::create`] for
+    /// the `warnings` array on X link posts.
     pub async fn create_and_publish(&self, params: CreatePostParams) -> Result<Value, Error> {
         self.client.post_json("/posts/create-and-publish", &params).await
     }

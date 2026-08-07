@@ -71,7 +71,7 @@ The API allows **100 requests per minute** per API key. When you exceed it, the 
 
 ## Return values
 
-Methods return the parsed response body as-is, as a `serde_json::Value`: single items come back as `{"data": {...}}`, lists as `{"data": [...], "pagination": {...}}`, and some responses carry extra sibling keys (media uploads include `compatibility`, PDF uploads include `slides` and `media_ids`). Endpoints that respond `204 No Content` (deletes) resolve to `Value::Null`. Index into values with `post["data"]["id"]`, or deserialize into your own structs with `serde_json::from_value`.
+Methods return the parsed response body as-is, as a `serde_json::Value`: single items come back as `{"data": {...}}`, lists as `{"data": [...], "pagination": {...}}`, and some responses carry extra sibling keys (media uploads include `compatibility`, PDF uploads include `slides` and `media_ids`, post creates targeting X with a URL in the text include `warnings`). Endpoints that respond `204 No Content` (deletes) resolve to `Value::Null`. Index into values with `post["data"]["id"]`, or deserialize into your own structs with `serde_json::from_value`.
 
 ## Posts
 
@@ -177,6 +177,27 @@ client.posts().create(CreatePostParams {
 ```
 
 On update, pass `json!({ "thread_parts": null })` to clear thread mode (revert to a single post); omit the field to leave the existing thread untouched.
+
+### X link posts use credits
+
+X bills API posts whose text contains a URL at a premium, and OmniSocials passes that fee through as prepaid credits (20 credits per URL-containing tweet; threads billed per part with a link). When a create targets X and the text contains a URL, the response carries a top-level `warnings` array (a sibling of `data`):
+
+```rust
+let res = client.posts().create(CreatePostParams {
+    content: "Read the full story: https://example.com/post".into(),
+    channels: Some(vec!["x".into()]),
+    ..Default::default()
+}).await?;
+if let Some(warnings) = res["warnings"].as_array() {
+    for warning in warnings {
+        if warning["code"] == "x_url_post_credits" {
+            println!("{} credits (balance: {})", warning["credits_required"], warning["credits_balance"]);
+        }
+    }
+}
+```
+
+From `enforce_from` (2026-08-14) the balance is checked at publish time, but credits are only deducted after the post successfully publishes (a failed publish is never charged). If the balance can't cover it, only the X target fails (other platforms publish normally); top up in the dashboard under Settings -> Organisation -> Billing -> Credits, then call `posts().retry`. Posts without links, analytics, and media on X stay free. There is no API endpoint for credits — they are managed in the dashboard.
 
 ### List, get, update, publish, retry, delete
 
