@@ -5,7 +5,7 @@ use crate::error::Error;
 use crate::types::{GetMessagesParams, ListConversationsParams, ReplyParams};
 
 /// `client.inbox()`: read and reply to social conversations - DMs, comments,
-/// and mentions - across Instagram, Facebook, and LinkedIn.
+/// and mentions - across Instagram, Facebook, LinkedIn, and X.
 ///
 /// The two list endpoints ([`list_conversations`](Inbox::list_conversations)
 /// and [`get_messages`](Inbox::get_messages)) use **cursor** pagination
@@ -92,6 +92,14 @@ impl Inbox<'_> {
     /// conversation. `text` is required; attach a single piece of media with
     /// `attachment_url` + `attachment_type` (`"image"`, `"video"`, `"audio"`,
     /// or `"file"`). The response returns the created message under `data`.
+    ///
+    /// Replying to an X DM costs 2 prepaid credits per send, debited before
+    /// the send and automatically refunded if the send fails. If the
+    /// balance can't cover it, this fails with [`Error::Api`] (status 402)
+    /// and code `insufficient_credits`. If the workspace's X inbox was
+    /// auto-suspended for hitting a zero balance, it fails with code
+    /// `x_inbox_suspended` instead; top up and re-enable the inbox to
+    /// resume (DMs that arrived while suspended are not recovered).
     pub async fn reply(
         &self,
         conversation_id: &str,

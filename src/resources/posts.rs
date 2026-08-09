@@ -56,6 +56,16 @@ impl Posts<'_> {
     /// and `credits_balance`: X's link-post fee is passed through as prepaid
     /// credits, debited at publish time (from 2026-08-14). Credits are
     /// managed in the dashboard, not the API.
+    ///
+    /// Separately, from 2026-08-14, scheduling or publishing that same post
+    /// can also be refused up front: if reserving this post's cost would
+    /// push the company's total reserved credits past its balance, the call
+    /// fails with [`Error::Api`] (status 402) and code
+    /// `x_credits_insufficient`, carrying `credits_required`,
+    /// `credits_balance`, and `credits_reserved` in the error body's
+    /// `error.details`. Drafts (no `scheduled_at`) are never gated, and
+    /// neither is any post publishing before 2026-08-14. The same gate
+    /// applies to [`Self::update`] and [`Self::publish`].
     pub async fn create(&self, params: CreatePostParams) -> Result<Value, Error> {
         self.client.post_json("/posts/create", &params).await
     }
@@ -67,7 +77,9 @@ impl Posts<'_> {
         self.client.post_json("/posts/create-and-publish", &params).await
     }
 
-    /// `PATCH /posts/:id` - update a draft or scheduled post.
+    /// `PATCH /posts/:id` - update a draft or scheduled post. For X posts
+    /// this can fail with `402 x_credits_insufficient` under the same
+    /// credit-reservation gate as [`Self::create`].
     pub async fn update(&self, id: &str, params: UpdatePostParams) -> Result<Value, Error> {
         self.client
             .patch_json(&format!("/posts/{}", encode_path_segment(id)), &params)
@@ -82,6 +94,8 @@ impl Posts<'_> {
     }
 
     /// `POST /posts/:id/publish` - publish a draft or scheduled post now.
+    /// For X posts this can fail with `402 x_credits_insufficient` under the
+    /// same credit-reservation gate as [`Self::create`].
     pub async fn publish(&self, id: &str) -> Result<Value, Error> {
         self.client
             .post_empty(&format!("/posts/{}/publish", encode_path_segment(id)))

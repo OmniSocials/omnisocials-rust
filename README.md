@@ -199,6 +199,25 @@ if let Some(warnings) = res["warnings"].as_array() {
 
 From `enforce_from` (2026-08-14) the balance is checked at publish time, but credits are only deducted after the post successfully publishes (a failed publish is never charged). If the balance can't cover it, only the X target fails (other platforms publish normally); top up in the dashboard under Settings -> Organisation -> Billing -> Credits, then call `posts().retry`. Posts without links, analytics, and media on X stay free. There is no API endpoint for credits — they are managed in the dashboard.
 
+Separately, from 2026-08-14, `create`, `update`, and `publish` also gate up front: if reserving this post's cost would push the company's total reserved credits past its balance, the call is refused before it's ever accepted, with `Error::Api` (status 402) and code `x_credits_insufficient`. `error.details` on that response carries `credits_required`, `credits_balance`, and `credits_reserved`. Drafts (no `scheduled_at`) are never gated, and neither is a post scheduled to publish before 2026-08-14.
+
+```rust
+use omnisocials::Error;
+
+match client.posts().create(CreatePostParams {
+    content: "Read the full story: https://example.com/post".into(),
+    channels: Some(vec!["x".into()]),
+    scheduled_at: Some("2026-08-20T09:00:00Z".into()),
+    ..Default::default()
+}).await {
+    Ok(post) => println!("scheduled {}", post["data"]["id"]),
+    Err(err) if err.code() == Some("x_credits_insufficient") => {
+        eprintln!("not enough reserved credits, top up in the dashboard");
+    }
+    Err(err) => eprintln!("create failed: {err}"),
+}
+```
+
 ### List, get, update, publish, retry, delete
 
 ```rust
@@ -474,6 +493,52 @@ let best = client.analytics().best_times(BestTimesParams {
     platform: "instagram".into(),
     timezone: Some("Europe/Amsterdam".into()),
 }).await?;
+```
+
+## Inbox
+
+Read and reply to social conversations, DMs, comments, and mentions, across Instagram, Facebook, LinkedIn, and X.
+
+```rust
+use omnisocials::{ListConversationsParams, ReplyParams};
+
+let conversations = client.inbox().list_conversations(ListConversationsParams {
+    platform: Some("instagram".into()),
+    unread: Some(true),
+    ..Default::default()
+}).await?;
+let conversation_id = conversations["data"][0]["id"].as_str().unwrap();
+
+client.inbox().get_messages(conversation_id, Default::default()).await?;
+client.inbox().mark_read(conversation_id).await?;
+client.inbox().reply(conversation_id, ReplyParams {
+    text: "Thanks for reaching out! We'll get back to you shortly.".into(),
+    ..Default::default()
+}).await?;
+```
+
+`list_conversations` and `get_messages` are cursor-paginated: read `pagination.next_cursor` from the response and pass it back as `cursor` to fetch the next page, and stop once `pagination.has_more` is `false`.
+
+### X DM replies use credits
+
+Replying to an X DM costs 2 prepaid credits per send, debited before the send and automatically refunded if the send fails. If the balance can't cover it, `reply` fails with `Error::Api` (status 402) and code `insufficient_credits`. If the workspace's X inbox was auto-suspended for hitting a zero balance, it fails with code `x_inbox_suspended` instead; top up and re-enable the inbox in the dashboard to resume (DMs that arrived while suspended are not recovered).
+
+```rust
+use omnisocials::Error;
+
+match client.inbox().reply(conversation_id, ReplyParams {
+    text: "On our way!".into(),
+    ..Default::default()
+}).await {
+    Ok(reply) => println!("sent {}", reply["data"]["id"]),
+    Err(err) if err.code() == Some("insufficient_credits") => {
+        eprintln!("not enough credits, top up in the dashboard");
+    }
+    Err(err) if err.code() == Some("x_inbox_suspended") => {
+        eprintln!("X inbox suspended, top up and re-enable it");
+    }
+    Err(err) => eprintln!("reply failed: {err}"),
+}
 ```
 
 ## Locations (Instagram place tagging)
