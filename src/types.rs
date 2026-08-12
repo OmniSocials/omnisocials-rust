@@ -253,6 +253,13 @@ pub struct CreatePostParams {
     /// Google Business options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google_business: Option<Value>,
+    /// Non-sponsored LinkedIn poll (e.g. `json!({"question": "...",
+    /// "options": ["A", "B"], "duration": "ONE_DAY"})`). Question max 140
+    /// chars; 2-4 `options`, each max 30 chars; `duration` one of
+    /// `"ONE_DAY"`, `"THREE_DAYS"`, `"SEVEN_DAYS"`, `"FOURTEEN_DAYS"`.
+    /// Mutually exclusive with media and a link share on the same post.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linkedin_poll: Option<Value>,
 }
 
 /// Body for `PATCH /posts/:id`.
@@ -260,6 +267,10 @@ pub struct CreatePostParams {
 /// For `x`, `bluesky`, and `mastodon`: passing `"thread_parts": null` inside
 /// the value explicitly clears thread mode (reverts to a single post), while
 /// omitting the field leaves the existing thread untouched.
+///
+/// For `linkedin_poll`: passing `json!(null)` as the field's own value
+/// explicitly clears the poll (reverts to a normal post), while omitting the
+/// field leaves the existing poll untouched.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct UpdatePostParams {
     /// New caption. Either a single string or a per-platform map.
@@ -324,6 +335,12 @@ pub struct UpdatePostParams {
     /// Google Business options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google_business: Option<Value>,
+    /// Non-sponsored LinkedIn poll (see [`CreatePostParams::linkedin_poll`]
+    /// for the shape). `Some(Value::Null)` (i.e. `json!(null)`) explicitly
+    /// clears the poll, reverting the post to normal; omitting the field
+    /// leaves the existing poll untouched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linkedin_poll: Option<Value>,
 }
 
 /// Query for `GET /posts`.

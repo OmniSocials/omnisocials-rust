@@ -75,6 +75,24 @@ fn create_post_params_serialize_full_shape() {
 }
 
 #[test]
+fn create_post_params_linkedin_poll_serializes() {
+    let params = CreatePostParams {
+        content: "Which do you prefer?".into(),
+        channels: Some(vec!["linkedin".into()]),
+        linkedin_poll: Some(json!({
+            "question": "Which do you prefer?",
+            "options": ["Coffee", "Tea"],
+            "duration": "ONE_DAY"
+        })),
+        ..Default::default()
+    };
+    let value = serde_json::to_value(&params).unwrap();
+    assert_eq!(value["linkedin_poll"]["question"], "Which do you prefer?");
+    assert_eq!(value["linkedin_poll"]["options"], json!(["Coffee", "Tea"]));
+    assert_eq!(value["linkedin_poll"]["duration"], "ONE_DAY");
+}
+
+#[test]
 fn media_refs_per_platform_serializes_as_object() {
     let refs: MediaRefs =
         HashMap::from([("instagram".to_owned(), vec!["id1".to_owned(), "id2".to_owned()])]).into();
@@ -121,6 +139,33 @@ fn update_post_params_thread_parts_null_survives() {
     // The explicit null must survive so the API clears thread mode.
     assert!(value["x"].get("thread_parts").is_some());
     assert!(value["x"]["thread_parts"].is_null());
+}
+
+#[test]
+fn update_post_params_linkedin_poll_null_clears() {
+    // Some(Value::Null) => explicit top-level JSON null (clears the poll).
+    let cleared = serde_json::to_value(UpdatePostParams {
+        linkedin_poll: Some(Value::Null),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(cleared, json!({"linkedin_poll": null}));
+
+    // None => omitted entirely (existing poll untouched).
+    let untouched = serde_json::to_value(UpdatePostParams::default()).unwrap();
+    assert!(untouched.get("linkedin_poll").is_none());
+
+    // Some(object) => sets/replaces the poll.
+    let set = serde_json::to_value(UpdatePostParams {
+        linkedin_poll: Some(json!({
+            "question": "New flavor?",
+            "options": ["Yes", "No"],
+            "duration": "THREE_DAYS"
+        })),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(set["linkedin_poll"]["duration"], "THREE_DAYS");
 }
 
 #[test]
