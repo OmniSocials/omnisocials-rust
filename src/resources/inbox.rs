@@ -5,7 +5,7 @@ use crate::error::Error;
 use crate::types::{GetMessagesParams, ListConversationsParams, ReplyParams};
 
 /// `client.inbox()`: read and reply to social conversations - DMs, comments,
-/// and mentions - across Instagram, Facebook, LinkedIn, and X.
+/// and mentions - across Instagram, Facebook, LinkedIn, TikTok, and X.
 ///
 /// The two list endpoints ([`list_conversations`](Inbox::list_conversations)
 /// and [`get_messages`](Inbox::get_messages)) use **cursor** pagination

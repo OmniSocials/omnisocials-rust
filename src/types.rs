@@ -592,7 +592,8 @@ pub struct BestTimesParams {
 /// fetch the next page (stop when `pagination.has_more` is `false`).
 #[derive(Debug, Clone, Default)]
 pub struct ListConversationsParams {
-    /// Restrict to one platform: `"instagram"`, `"facebook"`, `"linkedin"`, or `"x"`.
+    /// Restrict to one platform: `"instagram"`, `"facebook"`, `"linkedin"`,
+    /// `"tiktok"`, or `"x"`.
     pub platform: Option<String>,
     /// Conversation type: `"dm"`, `"comment"`, or `"mention"`.
     pub r#type: Option<String>,
