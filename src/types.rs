@@ -346,7 +346,9 @@ pub struct UpdatePostParams {
 /// Query for `GET /posts`.
 #[derive(Debug, Clone, Default)]
 pub struct ListPostsParams {
-    /// Filter by status, e.g. `"draft"`, `"scheduled"`, `"published"`, `"failed"`.
+    /// Filter by status: `"draft"`, `"in_approval"`, `"scheduled"`, `"posting"`,
+    /// `"published"`, `"failed"`, `"warning"`. `"in_approval"` = waiting for a
+    /// reviewer in an approval workflow.
     pub status: Option<String>,
     /// Max items to return (default 20, max 100).
     pub limit: Option<u32>,
