@@ -250,6 +250,12 @@ pub struct CreatePostParams {
     /// Mastodon options. Same `thread_parts` shape as `x` (500 chars per part).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mastodon: Option<Value>,
+    /// Threads (Meta) options. Same `thread_parts` shape as `x` (2-25 parts,
+    /// 500 chars per part, up to 10 media per part; parts after the first
+    /// publish as replies to the previous part, and the Threads caption is
+    /// taken from part 1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threads: Option<Value>,
     /// Google Business options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google_business: Option<Value>,
@@ -264,7 +270,7 @@ pub struct CreatePostParams {
 
 /// Body for `PATCH /posts/:id`.
 ///
-/// For `x`, `bluesky`, and `mastodon`: passing `"thread_parts": null` inside
+/// For `x`, `bluesky`, `mastodon`, and `threads`: passing `"thread_parts": null` inside
 /// the value explicitly clears thread mode (reverts to a single post), while
 /// omitting the field leaves the existing thread untouched.
 ///
@@ -332,6 +338,9 @@ pub struct UpdatePostParams {
     /// `json!({"thread_parts": null})` clears thread mode; omit to leave it untouched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mastodon: Option<Value>,
+    /// `json!({"thread_parts": null})` clears thread mode; omit to leave it untouched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threads: Option<Value>,
     /// Google Business options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google_business: Option<Value>,

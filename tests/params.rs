@@ -54,6 +54,12 @@ fn create_post_params_serialize_full_shape() {
                 { "text": "part two", "media_urls": ["https://example.com/b.jpg"] }
             ]
         })),
+        threads: Some(json!({
+            "thread_parts": [
+                { "text": "part one", "media_urls": ["https://example.com/c.jpg"] },
+                { "text": "part two" }
+            ]
+        })),
         ..Default::default()
     };
     let value = serde_json::to_value(&params).unwrap();
@@ -69,6 +75,8 @@ fn create_post_params_serialize_full_shape() {
     assert_eq!(value["user_tags"][0], json!({"username": "someone", "x": 0.5, "y": 0.25}));
     // Platform options pass through verbatim.
     assert_eq!(value["x"]["thread_parts"][1]["text"], "part two");
+    assert_eq!(value["threads"]["thread_parts"][0]["media_urls"][0], "https://example.com/c.jpg");
+    assert_eq!(value["threads"]["thread_parts"][1]["text"], "part two");
     // Unset platform blocks are absent, not null.
     assert!(value.get("instagram").is_none());
     assert!(value.get("google_business").is_none());
@@ -133,12 +141,15 @@ fn update_post_params_default_is_empty_object() {
 fn update_post_params_thread_parts_null_survives() {
     let params = UpdatePostParams {
         x: Some(json!({"thread_parts": null})),
+        threads: Some(json!({"thread_parts": null})),
         ..Default::default()
     };
     let value = serde_json::to_value(&params).unwrap();
     // The explicit null must survive so the API clears thread mode.
     assert!(value["x"].get("thread_parts").is_some());
     assert!(value["x"]["thread_parts"].is_null());
+    assert!(value["threads"].get("thread_parts").is_some());
+    assert!(value["threads"]["thread_parts"].is_null());
 }
 
 #[test]

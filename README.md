@@ -155,9 +155,9 @@ client.posts().create(CreatePostParams {
 }).await?;
 ```
 
-### X thread
+### Chained threads (X, Bluesky, Mastodon, Threads)
 
-Provide 2 to 25 `thread_parts` to publish a chained thread instead of a single tweet. Each part is capped at 280 characters and can carry its own media (`media_ids` / `media_urls`, max 4 per part). The same `thread_parts` shape works for `bluesky` (300 chars per part) and `mastodon` (500 chars per part).
+Provide 2 to 25 `thread_parts` to publish a chained thread instead of a single tweet. Each part is capped at 280 characters and can carry its own media (`media_ids` / `media_urls`, max 4 per part). The same `thread_parts` shape works for `bluesky` (300 chars per part), `mastodon` (500 chars per part) and `threads` (Meta Threads: 2 to 25 parts, 500 characters per part, up to 10 media per part; parts after the first publish as replies to the previous part, and the Threads caption is taken from part 1).
 
 ```rust
 client.posts().create(CreatePostParams {
@@ -176,7 +176,23 @@ client.posts().create(CreatePostParams {
 }).await?;
 ```
 
-On update, pass `json!({ "thread_parts": null })` to clear thread mode (revert to a single post); omit the field to leave the existing thread untouched.
+```rust
+// Meta Threads chain with a carousel on the first part
+client.posts().create(CreatePostParams {
+    content: "Behind the scenes of our summer shoot".into(),
+    channels: Some(vec!["threads".into()]),
+    threads: Some(json!({
+        "thread_parts": [
+            { "text": "Behind the scenes of our summer shoot. A few highlights:", "media_urls": ["https://example.com/shoot-1.jpg", "https://example.com/shoot-2.jpg"] },
+            { "text": "Day one: scouting locations at sunrise." },
+            { "text": "Day two: the full crew, 14 hours, zero regrets." }
+        ]
+    })),
+    ..Default::default()
+}).await?;
+```
+
+On update, pass `json!({ "thread_parts": null })` to clear thread mode (revert to a single post); omit the field to leave the existing thread untouched. The same applies to `bluesky`, `mastodon` and `threads`.
 
 ### X link posts use credits
 
