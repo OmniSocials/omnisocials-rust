@@ -513,7 +513,7 @@ let best = client.analytics().best_times(BestTimesParams {
 
 ## Inbox
 
-Read and reply to social conversations, DMs, comments, and mentions, across Instagram, Facebook, LinkedIn, TikTok (video comments only), and X. TikTok replies are comments only and capped at 150 characters.
+Read and reply to social conversations, DMs, comments, and mentions, across Instagram, Facebook, LinkedIn, TikTok (video comments only), YouTube (video comments only), and X. TikTok and YouTube replies are comments only; TikTok replies are capped at 150 characters.
 
 ```rust
 use omnisocials::{ListConversationsParams, ReplyParams};

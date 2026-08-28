@@ -604,7 +604,7 @@ pub struct BestTimesParams {
 #[derive(Debug, Clone, Default)]
 pub struct ListConversationsParams {
     /// Restrict to one platform: `"instagram"`, `"facebook"`, `"linkedin"`,
-    /// `"tiktok"`, or `"x"`.
+    /// `"tiktok"`, `"youtube"`, or `"x"`.
     pub platform: Option<String>,
     /// Conversation type: `"dm"`, `"comment"`, or `"mention"`.
     pub r#type: Option<String>,
