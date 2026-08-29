@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread::JoinHandle;
 
-use omnisocials::{Client, CreatePostParams, Error, ListPostsParams};
+use omnisocials::{Client, CreatePostParams, Error, ListPostsParams, SearchLocationsParams};
 
 // ─── Stub server ─────────────────────────────────────────────────────────────
 
@@ -137,6 +137,69 @@ async fn post_body_drops_none_fields_on_the_wire() {
     let body: serde_json::Value = serde_json::from_str(&captured[0][body_start..]).unwrap();
     assert_eq!(body, serde_json::json!({"content": "Wire test", "channels": ["bluesky"]}));
     assert!(captured[0].to_lowercase().contains("content-type: application/json"));
+}
+
+#[tokio::test]
+async fn inbox_hide_posts_the_hide_flag() {
+    let (base_url, handle) = spawn_stub(vec![http_response(
+        200,
+        "OK",
+        &[],
+        r#"{"data":{"id":"123","hidden":true}}"#,
+    )]);
+
+    let client = client_for(&base_url, 0);
+    let result = client.inbox().hide("123", true).await.unwrap();
+    assert_eq!(result["data"]["hidden"], true);
+
+    let captured = handle.join().unwrap();
+    assert!(captured[0].starts_with("POST /inbox/messages/123/hide HTTP/1.1"), "{}", captured[0]);
+    let body_start = captured[0].find("\r\n\r\n").unwrap() + 4;
+    let body: serde_json::Value = serde_json::from_str(&captured[0][body_start..]).unwrap();
+    assert_eq!(body, serde_json::json!({"hide": true}));
+}
+
+#[tokio::test]
+async fn locations_search_with_builds_platform_and_coordinate_queries() {
+    let (base_url, handle) = spawn_stub(vec![
+        http_response(200, "OK", &[], r#"{"locations":[]}"#),
+        http_response(200, "OK", &[], r#"{"locations":[]}"#),
+    ]);
+
+    let client = client_for(&base_url, 0);
+    client
+        .locations()
+        .search_with(SearchLocationsParams {
+            q: Some("cafe".into()),
+            platform: Some("threads".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    client
+        .locations()
+        .search_with(SearchLocationsParams {
+            platform: Some("threads".into()),
+            latitude: Some(52.37),
+            longitude: Some(-4.89),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let captured = handle.join().unwrap();
+    assert!(
+        captured[0].starts_with("GET /locations/search?q=cafe&platform=threads HTTP/1.1"),
+        "{}",
+        captured[0]
+    );
+    // Coordinates go on the wire with plain decimal points.
+    assert!(
+        captured[1]
+            .starts_with("GET /locations/search?platform=threads&latitude=52.37&longitude=-4.89 HTTP/1.1"),
+        "{}",
+        captured[1]
+    );
 }
 
 #[tokio::test]

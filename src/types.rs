@@ -253,7 +253,14 @@ pub struct CreatePostParams {
     /// Threads (Meta) options. Same `thread_parts` shape as `x` (2-25 parts,
     /// 500 chars per part, up to 10 media per part; parts after the first
     /// publish as replies to the previous part, and the Threads caption is
-    /// taken from part 1).
+    /// taken from part 1). Also accepts `location_id`: a Threads location id
+    /// from [`crate::resources::Locations::search_with`] with platform
+    /// `"threads"` (on a multi-part thread the tag is applied to part 1), or
+    /// alternatively `location`: an object `{id, name?, address?, city?,
+    /// country?}` to store display fields along with the id (`location_id`
+    /// wins when both are given). Threads location tagging is currently
+    /// rolling out; until Meta approves the permissions it is disabled on
+    /// production and calls return a clear error.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threads: Option<Value>,
     /// Google Business options.
@@ -338,7 +345,9 @@ pub struct UpdatePostParams {
     /// `json!({"thread_parts": null})` clears thread mode; omit to leave it untouched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mastodon: Option<Value>,
-    /// `json!({"thread_parts": null})` clears thread mode; omit to leave it untouched.
+    /// `json!({"thread_parts": null})` clears thread mode and
+    /// `json!({"location_id": null})` (or `json!({"location": null})`) clears
+    /// the Threads location tag; omit a field to leave it untouched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threads: Option<Value>,
     /// Google Business options.
@@ -594,6 +603,28 @@ pub struct BestTimesParams {
     pub timezone: Option<String>,
 }
 
+// ─── Locations ───────────────────────────────────────────────────────────────
+
+/// Query for `GET /locations/search`
+/// (see [`crate::resources::Locations::search_with`]).
+///
+/// Pass either `q` or the `latitude` + `longitude` pair (coordinates are
+/// Threads only); neither, both, a `q` under 2 characters, or out-of-range
+/// coordinates return a 400 validation error.
+#[derive(Debug, Clone, Default)]
+pub struct SearchLocationsParams {
+    /// Free-text search (min 2 characters).
+    pub q: Option<String>,
+    /// Location source: `"instagram"` (Facebook Places, the default) or
+    /// `"threads"` (Meta's Threads location catalog). The two sources use
+    /// different ids.
+    pub platform: Option<String>,
+    /// Latitude (-90..90). Threads only; pair with `longitude` instead of `q`.
+    pub latitude: Option<f64>,
+    /// Longitude (-180..180). Threads only; pair with `latitude` instead of `q`.
+    pub longitude: Option<f64>,
+}
+
 // ─── Inbox ───────────────────────────────────────────────────────────────────
 
 /// Query for `GET /inbox/conversations`.
@@ -604,9 +635,12 @@ pub struct BestTimesParams {
 #[derive(Debug, Clone, Default)]
 pub struct ListConversationsParams {
     /// Restrict to one platform: `"instagram"`, `"facebook"`, `"linkedin"`,
-    /// `"tiktok"`, `"youtube"`, or `"x"`.
+    /// `"tiktok"`, `"youtube"`, `"x"`, or `"threads"`. The Threads inbox is
+    /// currently rolling out; until Meta approves the permissions it is
+    /// disabled on production.
     pub platform: Option<String>,
-    /// Conversation type: `"dm"`, `"comment"`, or `"mention"`.
+    /// Conversation type: `"dm"`, `"comment"`, or `"mention"`. Threads has
+    /// `"comment"` and `"mention"` only (no DMs).
     pub r#type: Option<String>,
     /// When `true`, only return conversations that have unread messages.
     pub unread: Option<bool>,

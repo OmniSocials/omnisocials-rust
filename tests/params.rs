@@ -58,7 +58,8 @@ fn create_post_params_serialize_full_shape() {
             "thread_parts": [
                 { "text": "part one", "media_urls": ["https://example.com/c.jpg"] },
                 { "text": "part two" }
-            ]
+            ],
+            "location_id": "17843857450040591"
         })),
         ..Default::default()
     };
@@ -77,6 +78,7 @@ fn create_post_params_serialize_full_shape() {
     assert_eq!(value["x"]["thread_parts"][1]["text"], "part two");
     assert_eq!(value["threads"]["thread_parts"][0]["media_urls"][0], "https://example.com/c.jpg");
     assert_eq!(value["threads"]["thread_parts"][1]["text"], "part two");
+    assert_eq!(value["threads"]["location_id"], "17843857450040591");
     // Unset platform blocks are absent, not null.
     assert!(value.get("instagram").is_none());
     assert!(value.get("google_business").is_none());
@@ -141,7 +143,7 @@ fn update_post_params_default_is_empty_object() {
 fn update_post_params_thread_parts_null_survives() {
     let params = UpdatePostParams {
         x: Some(json!({"thread_parts": null})),
-        threads: Some(json!({"thread_parts": null})),
+        threads: Some(json!({"thread_parts": null, "location_id": null})),
         ..Default::default()
     };
     let value = serde_json::to_value(&params).unwrap();
@@ -150,6 +152,9 @@ fn update_post_params_thread_parts_null_survives() {
     assert!(value["x"]["thread_parts"].is_null());
     assert!(value["threads"].get("thread_parts").is_some());
     assert!(value["threads"]["thread_parts"].is_null());
+    // Same for location_id: the explicit null clears the Threads location tag.
+    assert!(value["threads"].get("location_id").is_some());
+    assert!(value["threads"]["location_id"].is_null());
 }
 
 #[test]

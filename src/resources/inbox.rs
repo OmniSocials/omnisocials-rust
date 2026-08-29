@@ -5,8 +5,16 @@ use crate::error::Error;
 use crate::types::{GetMessagesParams, ListConversationsParams, ReplyParams};
 
 /// `client.inbox()`: read and reply to social conversations - DMs, comments,
-/// and mentions - across Instagram, Facebook, LinkedIn, TikTok, YouTube,
-/// and X.
+/// and mentions - across Instagram, Facebook, LinkedIn, TikTok, YouTube, X,
+/// and Threads.
+///
+/// Threads conversations are `type` `"comment"` (replies people leave on the
+/// user's Threads posts; conversation ids look like
+/// `threads_comment_<rootPostId>`) and `"mention"`
+/// (`threads_mention_<postId>`); there are no Threads DMs. The Threads inbox
+/// is currently rolling out: until Meta approves the permissions it is
+/// disabled on production and calls return a clear error, and it needs a
+/// Threads connection with the reply permission.
 ///
 /// The two list endpoints ([`list_conversations`](Inbox::list_conversations)
 /// and [`get_messages`](Inbox::get_messages)) use **cursor** pagination
@@ -94,6 +102,13 @@ impl Inbox<'_> {
     /// `attachment_url` + `attachment_type` (`"image"`, `"video"`, `"audio"`,
     /// or `"file"`). The response returns the created message under `data`.
     ///
+    /// On a Threads conversation the reply publishes as a native Threads
+    /// reply. The Threads inbox is currently rolling out: until Meta approves
+    /// the permissions it is disabled on production, and it needs a Threads
+    /// connection with the reply permission. When the connection lacks that
+    /// permission this fails with [`Error::Auth`] (status 401) and code
+    /// `reauth_required` (reconnect Threads to fix it).
+    ///
     /// Replying to an X DM costs 2 prepaid credits per send, debited before
     /// the send and automatically refunded if the send fails. If the
     /// balance can't cover it, this fails with [`Error::Api`] (status 402)
@@ -113,6 +128,31 @@ impl Inbox<'_> {
                     encode_path_segment(conversation_id)
                 ),
                 &params,
+            )
+            .await
+    }
+
+    /// `POST /inbox/messages/:id/hide` - hide (`true`) or unhide (`false`) a
+    /// reply someone left on one of the user's Threads posts, as the post
+    /// owner (scope `inbox:write`). Threads only for now, and only incoming
+    /// top-level replies can be hidden (Threads does not allow hiding nested
+    /// replies); the message keeps its place in the conversation. The
+    /// response returns the updated message under `data` with `hidden`
+    /// flipped.
+    ///
+    /// Errors: 400 `unsupported_platform` (not an incoming Threads reply, or
+    /// the Threads inbox is not available yet), 400 `not_hideable` (nested
+    /// reply or Threads refused), 401 `reauth_required` (the connection lacks
+    /// the reply permission; reconnect Threads), 404 `not_found` (message not
+    /// in this workspace) or `account_not_connected` (no Threads account).
+    /// The Threads inbox is currently rolling out; until Meta approves the
+    /// permissions it is disabled on production and calls return a clear
+    /// error.
+    pub async fn hide(&self, message_id: &str, hide: bool) -> Result<Value, Error> {
+        self.client
+            .post_json(
+                &format!("/inbox/messages/{}/hide", encode_path_segment(message_id)),
+                &serde_json::json!({ "hide": hide }),
             )
             .await
     }

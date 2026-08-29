@@ -194,6 +194,8 @@ client.posts().create(CreatePostParams {
 
 On update, pass `json!({ "thread_parts": null })` to clear thread mode (revert to a single post); omit the field to leave the existing thread untouched. The same applies to `bluesky`, `mastodon` and `threads`.
 
+The `threads` options also accept `location_id`: a Threads location id from `locations().search_with` with platform `"threads"` (see [Locations](#locations-instagram-and-threads-place-tagging)). On a multi-part thread the tag is applied to part 1, and on update `json!({ "location_id": null })` clears the tag. Threads location tagging is currently rolling out; until Meta approves the permissions it is disabled on production and calls return a clear error.
+
 ### X link posts use credits
 
 X bills API posts whose text contains a URL at a premium, and OmniSocials passes that fee through as prepaid credits (20 credits per URL-containing tweet; threads billed per part with a link). When a create targets X and the text contains a URL, the response carries a top-level `warnings` array (a sibling of `data`):
@@ -513,7 +515,7 @@ let best = client.analytics().best_times(BestTimesParams {
 
 ## Inbox
 
-Read and reply to social conversations, DMs, comments, and mentions, across Instagram, Facebook, LinkedIn, TikTok (video comments only), YouTube (video comments only), and X. TikTok and YouTube replies are comments only; TikTok replies are capped at 150 characters.
+Read and reply to social conversations, DMs, comments, and mentions, across Instagram, Facebook, LinkedIn, TikTok (video comments only), YouTube (video comments only), X, and Threads. TikTok and YouTube replies are comments only; TikTok replies are capped at 150 characters. Threads conversations are `type` `"comment"` (replies people leave on your Threads posts; conversation ids look like `threads_comment_<rootPostId>`) and `"mention"` (`threads_mention_<postId>`); there are no Threads DMs, and a reply publishes as a native Threads reply. The Threads inbox is currently rolling out; until Meta approves the permissions it is disabled on production and calls return a clear error, and it needs a Threads connection with the reply permission (a connection without it fails with `Error::Auth`, status 401, code `reauth_required`; reconnect Threads to fix it).
 
 ```rust
 use omnisocials::{ListConversationsParams, ReplyParams};
@@ -525,12 +527,20 @@ let conversations = client.inbox().list_conversations(ListConversationsParams {
 }).await?;
 let conversation_id = conversations["data"][0]["id"].as_str().unwrap();
 
-client.inbox().get_messages(conversation_id, Default::default()).await?;
+let messages = client.inbox().get_messages(conversation_id, Default::default()).await?;
 client.inbox().mark_read(conversation_id).await?;
 client.inbox().reply(conversation_id, ReplyParams {
     text: "Thanks for reaching out! We'll get back to you shortly.".into(),
     ..Default::default()
 }).await?;
+
+// Hide (or unhide) a reply someone left on one of your Threads posts, as the
+// post owner. Threads only for now; only incoming top-level replies can be
+// hidden (nested replies return 400 not_hideable), and the message keeps its
+// place in the conversation. Returns the message with `hidden` flipped.
+let message_id = messages["data"][0]["id"].as_str().unwrap();
+client.inbox().hide(message_id, true).await?;  // hide
+client.inbox().hide(message_id, false).await?; // unhide
 ```
 
 `list_conversations` and `get_messages` are cursor-paginated: read `pagination.next_cursor` from the response and pass it back as `cursor` to fetch the next page, and stop once `pagination.has_more` is `false`.
@@ -557,7 +567,7 @@ match client.inbox().reply(conversation_id, ReplyParams {
 }
 ```
 
-## Locations (Instagram place tagging)
+## Locations (Instagram and Threads place tagging)
 
 ```rust
 let results = client.locations().search("Griffith Observatory").await?;
@@ -574,6 +584,35 @@ if check["valid"] == true {
         ..Default::default()
     }).await?;
 }
+```
+
+Use `search_with` with platform `"threads"` to search Meta's Threads location catalog instead of Facebook Places (the two sources use different ids). With platform `"threads"` you can also search around a point with `latitude` + `longitude` instead of `q` (pass either `q` or the coordinate pair). The Threads response is `{"locations": [...]}` (each entry: `id`, plus nullable `name`, `address`, `city`, `country`, `latitude`, `longitude`) or `{"error": {"code", "message"}}` with code `not_available`, `threads_not_connected`, `threads_reauth_required` (reconnect Threads), or `platform_error`. Use a result's `id` as `threads.location_id` in the post options, not as the top-level `location_id`. Threads location tagging is currently rolling out; until Meta approves the permissions it is disabled on production and calls return a clear error.
+
+```rust
+use omnisocials::SearchLocationsParams;
+
+let places = client.locations().search_with(SearchLocationsParams {
+    q: Some("Griffith Observatory".into()),
+    platform: Some("threads".into()),
+    ..Default::default()
+}).await?;
+// Or search around a point instead of by text:
+let nearby = client.locations().search_with(SearchLocationsParams {
+    platform: Some("threads".into()),
+    latitude: Some(34.1184),
+    longitude: Some(-118.3004),
+    ..Default::default()
+}).await?;
+let threads_location_id = places["locations"][0]["id"].as_str().unwrap();
+
+client.posts().create(CreatePostParams {
+    content: "Golden hour at the observatory".into(),
+    channels: Some(vec!["threads".into()]),
+    media_urls: Some(vec!["https://example.com/observatory.jpg"].into()),
+    threads: Some(json!({ "location_id": threads_location_id })),
+    scheduled_at: Some("2026-08-01T18:30:00Z".into()),
+    ..Default::default()
+}).await?;
 ```
 
 ## Webhooks
