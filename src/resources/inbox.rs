@@ -98,9 +98,13 @@ impl Inbox<'_> {
     }
 
     /// `POST /inbox/conversations/:id/reply` - send a reply in the
-    /// conversation. `text` is required; attach a single piece of media with
-    /// `attachment_url` + `attachment_type` (`"image"`, `"video"`, `"audio"`,
-    /// or `"file"`). The response returns the created message under `data`.
+    /// conversation. On Facebook and Instagram DMs, attach a single piece of
+    /// media with `attachment_url` + `attachment_type` (`"image"`,
+    /// `"video"`, `"audio"`, or `"file"`); `text` is optional when
+    /// `attachment_url` is set (an attachment-only reply is allowed). Other
+    /// platforms are text-only. The response returns the created message
+    /// under `data`, including an `attachment` object on messages that
+    /// carry media.
     ///
     /// On a Threads conversation the reply publishes as a native Threads
     /// reply. The Threads inbox is currently rolling out: until Meta approves

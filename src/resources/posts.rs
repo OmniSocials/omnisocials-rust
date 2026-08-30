@@ -112,4 +112,43 @@ impl Posts<'_> {
             .post_empty(&format!("/posts/{}/retry", encode_path_segment(id)))
             .await
     }
+
+    /// `POST /posts/:id/approve` - approve the current step of a post's
+    /// approval workflow, on behalf of the user who owns this API key. That
+    /// user must be a listed approver for the workflow's CURRENT step -
+    /// steps approve in order, so an approver on a later step gets a 403
+    /// `forbidden` error until earlier steps clear. Only works on a post
+    /// with `approval_status: "pending"`. If this is the last step, the
+    /// post finalizes immediately (`scheduled` or `posting`); otherwise it
+    /// stays `in_approval` and the next step's approvers are notified.
+    pub async fn approve(&self, id: &str) -> Result<Value, Error> {
+        self.client
+            .post_empty(&format!("/posts/{}/approve", encode_path_segment(id)))
+            .await
+    }
+
+    /// `POST /posts/:id/reject` - reject a post's approval workflow, on
+    /// behalf of the user who owns this API key. Same approver requirement
+    /// as [`Self::approve`]. Unlike approval, a rejection stops the WHOLE
+    /// workflow immediately (not just the current step) - the post's status
+    /// becomes `rejected`. `comment` is optional (pass `None`) and, when
+    /// given, is shown to the requester and other approvers in the post's
+    /// review thread.
+    pub async fn reject(&self, id: &str, comment: Option<&str>) -> Result<Value, Error> {
+        match comment {
+            Some(c) => {
+                self.client
+                    .post_json(
+                        &format!("/posts/{}/reject", encode_path_segment(id)),
+                        &serde_json::json!({ "comment": c }),
+                    )
+                    .await
+            }
+            None => {
+                self.client
+                    .post_empty(&format!("/posts/{}/reject", encode_path_segment(id)))
+                    .await
+            }
+        }
+    }
 }

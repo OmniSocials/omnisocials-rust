@@ -665,9 +665,11 @@ pub struct GetMessagesParams {
 /// Body for `POST /inbox/conversations/:id/reply`.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ReplyParams {
-    /// The reply text. Required.
+    /// The reply text. Optional when `attachment_url` is set — an
+    /// attachment-only reply is allowed.
     pub text: String,
-    /// Public URL of a single attachment to send with the reply.
+    /// Public URL of a single attachment to send with the reply (Facebook
+    /// and Instagram DMs only; other platforms are text-only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachment_url: Option<String>,
     /// Attachment kind: `"image"`, `"video"`, `"audio"`, or `"file"`. Pair
