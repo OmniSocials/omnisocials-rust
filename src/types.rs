@@ -238,10 +238,11 @@ pub struct CreatePostParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tiktok: Option<Value>,
     /// X (Twitter) options. Provide 2-25 `thread_parts` (each with `text`,
-    /// max 280 chars, and optional `media_ids`/`media_urls`, max 4) to
-    /// publish a thread; also supports `reply_settings`, `paid_partnership`,
-    /// `made_with_ai`. Thread-part media entries accept `{"url"|"id": ...,
-    /// "alt": ...}` objects for per-media alt text.
+    /// max 280 chars — 25,000 for Premium/Premium+ accounts — and optional
+    /// `media_ids`/`media_urls`, max 4) to publish a thread; also supports
+    /// `reply_settings`, `paid_partnership`, `made_with_ai`. Thread-part
+    /// media entries accept `{"url"|"id": ..., "alt": ...}` objects for
+    /// per-media alt text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x: Option<Value>,
     /// Bluesky options. Same `thread_parts` shape as `x` (300 chars per part).
