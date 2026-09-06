@@ -216,6 +216,15 @@ pub struct CreatePostParams {
     /// Restrict the hashtags to a subset of `channels`. Omit for all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hashtag_platforms: Option<Vec<String>>,
+    /// Route the post through a saved approval workflow (id from
+    /// `client.approval_workflows().list()`). The post is created as
+    /// `in_approval` (`approval_status: "pending"`) instead of `scheduled`;
+    /// its approvers are notified and it publishes at `scheduled_at` once the
+    /// last step approves (dashboard, or `posts().approve`). Requires
+    /// `scheduled_at`; not allowed with `publish_now`. Errors:
+    /// `404 workflow_not_found`, `400 validation_error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_workflow_id: Option<String>,
     /// Pinterest options (e.g. `json!({"board_id": "...", "title": "..."})`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinterest: Option<Value>,

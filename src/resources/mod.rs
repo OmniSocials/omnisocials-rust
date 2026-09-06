@@ -3,6 +3,7 @@
 
 mod accounts;
 mod analytics;
+mod approval_workflows;
 mod audio;
 mod folders;
 mod hashtag_sets;
@@ -14,6 +15,7 @@ mod webhooks;
 
 pub use accounts::Accounts;
 pub use analytics::Analytics;
+pub use approval_workflows::ApprovalWorkflows;
 pub use audio::Audio;
 pub use folders::Folders;
 pub use hashtag_sets::HashtagSets;

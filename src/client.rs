@@ -14,7 +14,8 @@ use serde_json::Value;
 
 use crate::error::Error;
 use crate::resources::{
-    Accounts, Analytics, Audio, Folders, HashtagSets, Inbox, Locations, Media, Posts, Webhooks,
+    Accounts, Analytics, ApprovalWorkflows, Audio, Folders, HashtagSets, Inbox, Locations, Media,
+    Posts, Webhooks,
 };
 
 /// Crate version, used in the `User-Agent` header.
@@ -197,6 +198,11 @@ impl Client {
     /// Saved hashtag sets: list, get, create, update, delete.
     pub fn hashtag_sets(&self) -> HashtagSets<'_> {
         HashtagSets { client: self }
+    }
+
+    /// Approval workflows (configured in the dashboard): list.
+    pub fn approval_workflows(&self) -> ApprovalWorkflows<'_> {
+        ApprovalWorkflows { client: self }
     }
 
     /// Connected social accounts: list, get.
