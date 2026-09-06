@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::client::{encode_path_segment, Client};
 use crate::error::Error;
-use crate::types::{GetMessagesParams, ListConversationsParams, ReplyParams};
+use crate::types::{GetMessagesParams, ListConversationsParams, NextUnansweredParams, ReplyParams};
 
 /// `client.inbox()`: read and reply to social conversations - DMs, comments,
 /// and mentions - across Instagram, Facebook, LinkedIn, TikTok, YouTube, X,
@@ -34,8 +34,10 @@ pub struct Inbox<'a> {
 
 impl Inbox<'_> {
     /// `GET /inbox/conversations` - list conversations (most recent activity
-    /// first), optionally filtered by `platform`, `type`, or `unread`.
-    /// Cursor-paginated: see the [`Inbox`] type docs for how to page.
+    /// first), optionally filtered by `platform`, `type`, `unread`, or
+    /// `unanswered` (only conversations that still need an answer; see
+    /// [`ListConversationsParams::unanswered`]). Cursor-paginated: see the
+    /// [`Inbox`] type docs for how to page.
     pub async fn list_conversations(
         &self,
         params: ListConversationsParams,
@@ -49,6 +51,9 @@ impl Inbox<'_> {
         }
         if let Some(unread) = params.unread {
             query.push(("unread", unread.to_string()));
+        }
+        if let Some(unanswered) = params.unanswered {
+            query.push(("unanswered", unanswered.to_string()));
         }
         if let Some(limit) = params.limit {
             query.push(("limit", limit.to_string()));
@@ -120,6 +125,12 @@ impl Inbox<'_> {
     /// auto-suspended for hitting a zero balance, it fails with code
     /// `x_inbox_suspended` instead; top up and re-enable the inbox to
     /// resume (DMs that arrived while suspended are not recovered).
+    ///
+    /// Set `include_next: Some(true)` to also get `next` (the next
+    /// conversation that needs an answer, the same object [`next`](Self::next)
+    /// returns under `data`, using its default queue order and filters;
+    /// `null` when nothing is waiting) and `remaining` in the response. Saves
+    /// the extra call when working through the inbox.
     pub async fn reply(
         &self,
         conversation_id: &str,
@@ -137,21 +148,30 @@ impl Inbox<'_> {
     }
 
     /// `POST /inbox/messages/:id/hide` - hide (`true`) or unhide (`false`) a
-    /// reply someone left on one of the user's Threads posts, as the post
-    /// owner (scope `inbox:write`). Threads only for now, and only incoming
-    /// top-level replies can be hidden (Threads does not allow hiding nested
-    /// replies); the message keeps its place in the conversation. The
-    /// response returns the updated message under `data` with `hidden`
-    /// flipped.
+    /// comment someone left on one of your posts, on the platform, as the
+    /// post owner (scope `inbox:write`). Facebook, Instagram, TikTok, YouTube
+    /// and Threads comments (Threads: incoming top-level replies only;
+    /// Threads does not allow hiding nested replies). On YouTube, hide sets
+    /// the comment's moderation status to rejected, which removes it and its
+    /// replies from public view; unhide publishes it again. The message keeps
+    /// its place in the conversation and the response returns it under
+    /// `data` with `hidden` flipped; a hidden comment no longer counts as
+    /// unanswered. The account must have been connected with the moderation
+    /// permission (Facebook `pages_manage_engagement`, Instagram
+    /// `instagram_business_manage_comments`).
     ///
-    /// Errors: 400 `unsupported_platform` (not an incoming Threads reply, or
-    /// the Threads inbox is not available yet), 400 `not_hideable` (nested
-    /// reply or Threads refused), 401 `reauth_required` (the connection lacks
-    /// the reply permission; reconnect Threads), 404 `not_found` (message not
-    /// in this workspace) or `account_not_connected` (no Threads account).
-    /// The Threads inbox is currently rolling out; until Meta approves the
-    /// permissions it is disabled on production and calls return a clear
-    /// error.
+    /// Errors: 400 `unsupported_platform` (not an incoming comment on a
+    /// supported platform), 400 `not_hideable` (Threads nested reply, or
+    /// Threads refused), 401 `reauth_required` (the Threads reply permission
+    /// or the TikTok comments authorization is missing or expired), 403
+    /// `reconnect_required` (the account was connected without the
+    /// comment-moderation permission; reconnect it in the dashboard), 404
+    /// `not_found` (message not in this workspace) or
+    /// `account_not_connected`, 429 `quota_exceeded` (YouTube's daily API
+    /// quota is used up; retry after midnight Pacific), 502 `platform_error`
+    /// (the platform rejected the call). The Threads inbox is currently
+    /// rolling out; until Meta approves the permissions it is disabled on
+    /// production and Threads calls return a clear error.
     pub async fn hide(&self, message_id: &str, hide: bool) -> Result<Value, Error> {
         self.client
             .post_json(
@@ -159,5 +179,85 @@ impl Inbox<'_> {
                 &serde_json::json!({ "hide": hide }),
             )
             .await
+    }
+
+    /// `DELETE /inbox/messages/:id` - delete a comment someone left on one of
+    /// your posts, on the platform and from the inbox (scope `inbox:write`).
+    /// Facebook, Instagram and TikTok comments only: YouTube's API does not
+    /// let a channel delete other people's comments, hide those instead
+    /// ([`hide`](Self::hide)). Replies under the deleted comment go with it
+    /// (the platforms cascade the delete and the inbox mirrors that); their
+    /// inbox ids come back as `removed_reply_ids`. A comment that is already
+    /// gone on the platform is still removed from the inbox. This cannot be
+    /// undone. The response is `{ "data": { "id", "conversation_id",
+    /// "removed_reply_ids" } }`.
+    ///
+    /// Errors: 400 `unsupported_platform` (not an incoming Facebook,
+    /// Instagram or TikTok comment), 401 `reauth_required` (the TikTok
+    /// comments authorization expired), 403 `reconnect_required` (the account
+    /// was connected without the comment-moderation permission; reconnect it
+    /// in the dashboard), 404 `not_found` (message not in this workspace) or
+    /// `account_not_connected`, 502 `platform_error` (the platform rejected
+    /// the call).
+    pub async fn delete_message(&self, message_id: &str) -> Result<Value, Error> {
+        self.client
+            .delete(&format!(
+                "/inbox/messages/{}",
+                encode_path_segment(message_id)
+            ))
+            .await
+    }
+
+    /// `GET /inbox/next` - the next conversation that needs an answer: a work
+    /// queue for answering the inbox (scope `inbox:read`). Returns the oldest
+    /// (by default) item that still needs a reply, together with its
+    /// conversation so far and the post it belongs to, so a reply can be
+    /// drafted from one call. An item needs an answer when it is the
+    /// customer's latest DM with no reply after it (Instagram/Facebook DMs
+    /// within the 24-hour messaging window only, since Meta refuses replies
+    /// outside it), or a comment/mention that has not been replied to and is
+    /// not hidden. Replies typed in the native apps count as answers (they
+    /// are mirrored into the inbox), so a thread a colleague answered on
+    /// their phone is not served again. Instagram mentions are skipped (no
+    /// reply path). Looks at the last 30 days of activity.
+    ///
+    /// Only unread items are served by default: marking a conversation read
+    /// ([`mark_read`](Self::mark_read)) is how to skip one for good; set
+    /// `include_read: Some(true)` to include read-but-unanswered items.
+    /// `exclude` is a session-local skip: conversation ids to leave out of
+    /// this call (up to 100). `order` is `"oldest"` (default: the item that
+    /// has waited longest first) or `"newest"`.
+    ///
+    /// The response is `{ "data": ..., "remaining": n }`. `data` is
+    /// `{ "conversation", "message", "messages" }`, or `null` when nothing is
+    /// waiting. `message` is the unanswered incoming item itself (the
+    /// customer's latest DM, or the specific comment): its `id` is what
+    /// [`hide`](Self::hide) and [`delete_message`](Self::delete_message)
+    /// take, its `conversation_id` is what [`reply`](Self::reply) takes.
+    /// `messages` is the conversation so far, oldest first (the most recent
+    /// 50 messages for long DM threads). `remaining` is the number of
+    /// unanswered items still waiting after this one (capped at 500), `0`
+    /// when `data` is `null`. To chain the queue, set `include_next` on
+    /// [`reply`](Self::reply) and it returns the next item in the same
+    /// response. Errors: 400 `validation_error` (unknown platform, type or
+    /// order).
+    pub async fn next(&self, params: NextUnansweredParams) -> Result<Value, Error> {
+        let mut query = Vec::new();
+        if let Some(platform) = params.platform {
+            query.push(("platform", platform));
+        }
+        if let Some(r#type) = params.r#type {
+            query.push(("type", r#type));
+        }
+        if let Some(order) = params.order {
+            query.push(("order", order));
+        }
+        if let Some(include_read) = params.include_read {
+            query.push(("include_read", include_read.to_string()));
+        }
+        if let Some(exclude) = params.exclude.filter(|ids| !ids.is_empty()) {
+            query.push(("exclude", exclude.join(",")));
+        }
+        self.client.get("/inbox/next", query).await
     }
 }

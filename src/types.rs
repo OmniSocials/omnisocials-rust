@@ -654,6 +654,14 @@ pub struct ListConversationsParams {
     pub r#type: Option<String>,
     /// When `true`, only return conversations that have unread messages.
     pub unread: Option<bool>,
+    /// When `true`, only return conversations that still need an answer: the
+    /// customer's latest DM has no reply after it (Instagram/Facebook DMs
+    /// within the 24-hour messaging window only), or a comment/mention that
+    /// has not been replied to and is not hidden. Replies typed in the
+    /// native apps count as answers (they are mirrored into the inbox). Read
+    /// state is ignored here; use [`next`](crate::resources::Inbox::next) for
+    /// a work queue.
+    pub unanswered: Option<bool>,
     /// Max conversations to return (1-100).
     pub limit: Option<u32>,
     /// Opaque cursor from a previous page's `pagination.next_cursor`.
@@ -686,6 +694,33 @@ pub struct ReplyParams {
     /// with `attachment_url`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachment_type: Option<String>,
+    /// When `true`, the response also carries `next` (the next conversation
+    /// that needs an answer, the same object
+    /// [`next`](crate::resources::Inbox::next) returns under `data`, using
+    /// its default queue order and filters; `null` when nothing is waiting)
+    /// and `remaining`. Saves the extra call when working through the inbox.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_next: Option<bool>,
+}
+
+/// Query for `GET /inbox/next`. All fields are optional.
+#[derive(Debug, Clone, Default)]
+pub struct NextUnansweredParams {
+    /// Only items from one platform: `"instagram"`, `"facebook"`,
+    /// `"linkedin"`, `"tiktok"`, `"youtube"`, `"x"`, or `"threads"`.
+    pub platform: Option<String>,
+    /// Only items of one type: `"dm"`, `"comment"`, or `"mention"`.
+    pub r#type: Option<String>,
+    /// `"oldest"` (the default: the item that has waited longest first) or
+    /// `"newest"` (the most recent).
+    pub order: Option<String>,
+    /// Also serve items that were marked read but never answered. By default
+    /// only unread items are served, so marking a conversation read is the
+    /// durable way to skip it.
+    pub include_read: Option<bool>,
+    /// Conversation ids to leave out of this call (a session-local skip; up
+    /// to 100). Sent comma-separated.
+    pub exclude: Option<Vec<String>>,
 }
 
 // ─── Webhooks ────────────────────────────────────────────────────────────────

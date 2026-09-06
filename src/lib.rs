@@ -51,8 +51,9 @@ pub use types::{
     AccountAnalyticsParams, AnalyticsOverviewParams, BestTimesParams, CheckMediaParams, Content,
     CreateFolderParams, CreateHashtagSetParams, CreatePostParams, CreateWebhookParams,
     GetMessagesParams, Hashtags, ListConversationsParams, ListMediaParams, ListPostsParams,
-    MediaEntry, MediaRefs, RecentPlatformPostsParams, ReplyParams, SearchLocationsParams,
-    UpdateFolderParams, UpdateHashtagSetParams, UpdateMediaParams, UpdatePostParams,
+    MediaEntry, MediaRefs, NextUnansweredParams, RecentPlatformPostsParams, ReplyParams,
+    SearchLocationsParams, UpdateFolderParams, UpdateHashtagSetParams, UpdateMediaParams,
+    UpdatePostParams,
     UpdateWebhookParams, UploadMediaFromBase64Params, UploadMediaFromUrlParams, UploadMediaParams,
     UserTag,
 };

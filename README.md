@@ -543,13 +543,42 @@ client.inbox().reply(conversation_id, ReplyParams {
     ..Default::default()
 }).await?;
 
-// Hide (or unhide) a reply someone left on one of your Threads posts, as the
-// post owner. Threads only for now; only incoming top-level replies can be
-// hidden (nested replies return 400 not_hideable), and the message keeps its
-// place in the conversation. Returns the message with `hidden` flipped.
+// Hide (or unhide) a comment someone left on one of your posts, as the post
+// owner: Facebook, Instagram, TikTok, YouTube and Threads comments (Threads:
+// incoming top-level replies only). The message keeps its place in the
+// conversation and comes back with `hidden` flipped.
 let message_id = messages["data"][0]["id"].as_str().unwrap();
 client.inbox().hide(message_id, true).await?;  // hide
 client.inbox().hide(message_id, false).await?; // unhide
+
+// Delete a comment outright (Facebook, Instagram, TikTok; YouTube: hide
+// instead). Replies under it go with it; their ids come back as
+// `removed_reply_ids`.
+client.inbox().delete_message(message_id).await?;
+```
+
+### Work queue: what needs an answer
+
+`inbox().next()` hands out the next conversation that still needs a reply (the customer's latest DM with no reply after it, or an unreplied comment/mention that is not hidden), with the whole thread and the post it belongs to (`post.url`, `post.media_type`), so a reply can be drafted from one call. Replies typed in the native apps count as answers. Only unread items are served by default, so `mark_read` is the durable way to skip one; `exclude` skips conversation ids for the current session only. Set `include_next: Some(true)` on `reply` to get the following item in the same response. `ListConversationsParams { unanswered: Some(true), .. }` gives the same set as a plain list.
+
+```rust
+use omnisocials::NextUnansweredParams;
+
+let mut next = client.inbox().next(NextUnansweredParams {
+    platform: Some("instagram".into()),
+    ..Default::default()
+}).await?;
+while !next["data"].is_null() {
+    let message = &next["data"]["message"];
+    println!("{} left. {}: {}", next["remaining"], message["sender"]["username"], message["text"]);
+
+    let reply = client.inbox().reply(message["conversation_id"].as_str().unwrap(), ReplyParams {
+        text: "Thanks! DM sent.".into(),
+        include_next: Some(true),
+        ..Default::default()
+    }).await?;
+    next = serde_json::json!({ "data": reply["next"], "remaining": reply["remaining"] });
+}
 ```
 
 `list_conversations` and `get_messages` are cursor-paginated: read `pagination.next_cursor` from the response and pass it back as `cursor` to fetch the next page, and stop once `pagination.has_more` is `false`.
