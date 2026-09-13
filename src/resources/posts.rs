@@ -86,7 +86,7 @@ impl Posts<'_> {
             .await
     }
 
-    /// `DELETE /posts/:id` - delete a post. Resolves to [`Value::Null`] (204).
+    /// `DELETE /posts/:id` - remove a post from OmniSocials (the live post stays on the platform). Resolves to [`Value::Null`] (204).
     pub async fn delete(&self, id: &str) -> Result<Value, Error> {
         self.client
             .delete(&format!("/posts/{}", encode_path_segment(id)))
