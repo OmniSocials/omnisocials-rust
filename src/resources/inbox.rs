@@ -12,9 +12,8 @@ use crate::types::{GetMessagesParams, ListConversationsParams, NextUnansweredPar
 /// user's Threads posts; conversation ids look like
 /// `threads_comment_<rootPostId>`) and `"mention"`
 /// (`threads_mention_<postId>`); there are no Threads DMs. The Threads inbox
-/// is currently rolling out: until Meta approves the permissions it is
-/// disabled on production and calls return a clear error, and it needs a
-/// Threads connection with the reply permission.
+/// needs a Threads connection with the reply permissions; connections made
+/// before those permissions existed must be reconnected once.
 ///
 /// The two list endpoints ([`list_conversations`](Inbox::list_conversations)
 /// and [`get_messages`](Inbox::get_messages)) use **cursor** pagination
@@ -112,11 +111,10 @@ impl Inbox<'_> {
     /// carry media.
     ///
     /// On a Threads conversation the reply publishes as a native Threads
-    /// reply. The Threads inbox is currently rolling out: until Meta approves
-    /// the permissions it is disabled on production, and it needs a Threads
-    /// connection with the reply permission. When the connection lacks that
-    /// permission this fails with [`Error::Auth`] (status 401) and code
-    /// `reauth_required` (reconnect Threads to fix it).
+    /// reply. The Threads inbox needs a Threads connection with the reply
+    /// permission. When the connection lacks that permission (connected
+    /// before it existed) this fails with [`Error::Auth`] (status 401) and
+    /// code `reauth_required` (reconnect Threads to fix it).
     ///
     /// Replying to an X DM costs 2 prepaid credits per send, debited before
     /// the send and automatically refunded if the send fails. If the
@@ -169,9 +167,9 @@ impl Inbox<'_> {
     /// `not_found` (message not in this workspace) or
     /// `account_not_connected`, 429 `quota_exceeded` (YouTube's daily API
     /// quota is used up; retry after midnight Pacific), 502 `platform_error`
-    /// (the platform rejected the call). The Threads inbox is currently
-    /// rolling out; until Meta approves the permissions it is disabled on
-    /// production and Threads calls return a clear error.
+    /// (the platform rejected the call). The Threads inbox needs a Threads
+    /// connection with the reply permissions; a connection made before those
+    /// permissions existed answers 401 `reauth_required` until reconnected.
     pub async fn hide(&self, message_id: &str, hide: bool) -> Result<Value, Error> {
         self.client
             .post_json(

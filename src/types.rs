@@ -645,9 +645,7 @@ pub struct SearchLocationsParams {
 #[derive(Debug, Clone, Default)]
 pub struct ListConversationsParams {
     /// Restrict to one platform: `"instagram"`, `"facebook"`, `"linkedin"`,
-    /// `"tiktok"`, `"youtube"`, `"x"`, or `"threads"`. The Threads inbox is
-    /// currently rolling out; until Meta approves the permissions it is
-    /// disabled on production.
+    /// `"tiktok"`, `"youtube"`, `"x"`, or `"threads"`.
     pub platform: Option<String>,
     /// Conversation type: `"dm"`, `"comment"`, or `"mention"`. Threads has
     /// `"comment"` and `"mention"` only (no DMs).
