@@ -283,6 +283,14 @@ pub struct CreatePostParams {
     /// Mutually exclusive with media and a link share on the same post.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linkedin_poll: Option<Value>,
+    /// Video thumbnail for a post whose media is one video, e.g.
+    /// `json!({"type": "frame", "thumb_offset": 3000})` or
+    /// `json!({"type": "custom", "cover_url": "https://..."})`, plus an
+    /// optional `"overrides"` map keyed by platform id. Applied on
+    /// Instagram, Facebook, LinkedIn, TikTok (frame only), Pinterest and
+    /// YouTube Shorts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_cover: Option<Value>,
 }
 
 /// Body for `PATCH /posts/:id`.
@@ -369,6 +377,11 @@ pub struct UpdatePostParams {
     /// leaves the existing poll untouched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linkedin_poll: Option<Value>,
+    /// Replaces the stored video cover wholesale (see
+    /// [`CreatePostParams::video_cover`]). `json!(null)` removes it; omit to
+    /// leave it untouched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_cover: Option<Value>,
 }
 
 /// Query for `GET /posts`.
