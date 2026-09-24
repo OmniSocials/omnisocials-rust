@@ -559,7 +559,7 @@ client.inbox().delete_message(message_id).await?;
 
 ### Work queue: what needs an answer
 
-`inbox().next()` hands out the next conversation that still needs a reply (the customer's latest DM with no reply after it, or an unreplied comment/mention that is not hidden), with the whole thread and the post it belongs to (`post.url`, `post.media_type`), so a reply can be drafted from one call. Replies typed in the native apps count as answers. Only unread items are served by default, so `mark_read` is the durable way to skip one; `exclude` skips conversation ids for the current session only. Set `include_next: Some(true)` on `reply` to get the following item in the same response. `ListConversationsParams { unanswered: Some(true), .. }` gives the same set as a plain list.
+`inbox().next()` hands out the next conversation that still needs a reply (the customer's latest DM with no reply after it, or an unreplied comment/mention that is not hidden), with the whole thread and the post it belongs to (`post.url`, `post.media_type`), so a reply can be drafted from one call. DMs that can still be answered come first, then Instagram/Facebook DMs whose 24-hour window has closed (`reply_window.open` is `false`: answer those from the native app or mark them read), then comments and mentions, oldest first. Replies typed in the native apps count as answers. Only unread items are served by default, so `mark_read` is the durable way to skip one; `exclude` skips conversation ids for the current session only. Always set `message_id` to the served `message.id` on `reply` for comment threads: every comment on a post shares one conversation, and without it the reply goes under the newest comment on the post. Set `include_next: Some(true)` on `reply` to get the following item in the same response. `ListConversationsParams { unanswered: Some(true), .. }` gives the same set as a plain list.
 
 ```rust
 use omnisocials::NextUnansweredParams;
@@ -572,8 +572,20 @@ while !next["data"].is_null() {
     let message = &next["data"]["message"];
     println!("{} left. {}: {}", next["remaining"], message["sender"]["username"], message["text"]);
 
+    if next["data"]["reply_window"]["open"] == false {
+        // An Instagram/Facebook DM past Meta's 24-hour window: reply would fail
+        // with 422 outside_messaging_window. Answer it in the app, or skip it.
+        client.inbox().mark_read(message["conversation_id"].as_str().unwrap()).await?;
+        next = client.inbox().next(NextUnansweredParams {
+            platform: Some("instagram".into()),
+            ..Default::default()
+        }).await?;
+        continue;
+    }
+
     let reply = client.inbox().reply(message["conversation_id"].as_str().unwrap(), ReplyParams {
         text: "Thanks! DM sent.".into(),
+        message_id: message["id"].as_str().map(str::to_owned), // the comment being answered, not the newest one
         include_next: Some(true),
         ..Default::default()
     }).await?;

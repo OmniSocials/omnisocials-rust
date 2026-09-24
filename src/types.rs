@@ -667,11 +667,12 @@ pub struct ListConversationsParams {
     pub unread: Option<bool>,
     /// When `true`, only return conversations that still need an answer: the
     /// customer's latest DM has no reply after it (Instagram/Facebook DMs
-    /// within the 24-hour messaging window only), or a comment/mention that
-    /// has not been replied to and is not hidden. Replies typed in the
-    /// native apps count as answers (they are mirrored into the inbox). Read
-    /// state is ignored here; use [`next`](crate::resources::Inbox::next) for
-    /// a work queue.
+    /// past Meta's 24-hour messaging window included: they cannot be
+    /// answered through the API, but the customer is still waiting), or a
+    /// comment/mention that has not been replied to and is not hidden.
+    /// Replies typed in the native apps count as answers (they are mirrored
+    /// into the inbox). Read state is ignored here; use
+    /// [`next`](crate::resources::Inbox::next) for a work queue.
     pub unanswered: Option<bool>,
     /// Max conversations to return (1-100).
     pub limit: Option<u32>,
@@ -705,6 +706,18 @@ pub struct ReplyParams {
     /// with `attachment_url`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachment_type: Option<String>,
+    /// For comment and mention threads: the inbox id of the specific incoming
+    /// comment being answered (`message.id` from
+    /// [`next`](crate::resources::Inbox::next), or a message `id` from
+    /// [`get_messages`](crate::resources::Inbox::get_messages)). Every
+    /// comment on a post shares one conversation, so without it the reply is
+    /// posted under the newest comment on the post, which may be a different
+    /// person than the one you drafted for. Always set it when replying to
+    /// an item served by the queue. Ignored for DMs (a DM reply goes to the
+    /// conversation). 404 `not_found` when it is not an incoming message of
+    /// this conversation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
     /// When `true`, the response also carries `next` (the next conversation
     /// that needs an answer, the same object
     /// [`next`](crate::resources::Inbox::next) returns under `data`, using
