@@ -436,6 +436,10 @@ pub struct UploadMediaParams {
     pub folder: Option<String>,
     /// Id of an existing folder to file the asset under.
     pub folder_id: Option<String>,
+    /// PDF uploads only: `"slides"` (default, one image item per page) or
+    /// `"document"` (one item whose single id in `media_ids` expands into
+    /// every page).
+    pub pdf_mode: Option<String>,
 }
 
 /// Body for `POST /media/upload-from-url`.
@@ -455,6 +459,9 @@ pub struct UploadMediaFromUrlParams {
     /// Id of an existing folder to file the asset under.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_id: Option<String>,
+    /// PDF uploads only: `"slides"` (default) or `"document"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pdf_mode: Option<String>,
 }
 
 /// Body for `POST /media/upload-from-base64`.
@@ -476,6 +483,9 @@ pub struct UploadMediaFromBase64Params {
     /// Id of an existing folder to file the asset under.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_id: Option<String>,
+    /// PDF uploads only: `"slides"` (default) or `"document"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pdf_mode: Option<String>,
 }
 
 /// Body for `POST /media/check`. Provide one of: a public `url`, an existing

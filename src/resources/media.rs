@@ -56,6 +56,9 @@ impl Media<'_> {
         if let Some(folder_id) = params.folder_id {
             fields.push(("folder_id", folder_id));
         }
+        if let Some(pdf_mode) = params.pdf_mode {
+            fields.push(("pdf_mode", pdf_mode));
+        }
         let filename = if params.filename.is_empty() {
             "upload.bin".to_owned()
         } else {
