@@ -287,8 +287,9 @@ pub struct CreatePostParams {
     /// `json!({"type": "frame", "thumb_offset": 3000})` or
     /// `json!({"type": "custom", "cover_url": "https://..."})`, plus an
     /// optional `"overrides"` map keyed by platform id. Applied on
-    /// Instagram, Facebook, LinkedIn, TikTok (frame only), Pinterest and
-    /// YouTube Shorts.
+    /// Instagram, Facebook, LinkedIn, TikTok (frame only) and Pinterest. On
+    /// YouTube Shorts the cover is stored as the default thumbnail, but
+    /// YouTube shows a frame from the video on Shorts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_cover: Option<Value>,
 }
