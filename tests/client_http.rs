@@ -140,6 +140,27 @@ async fn post_body_drops_none_fields_on_the_wire() {
 }
 
 #[tokio::test]
+async fn posts_get_approval_reads_the_review() {
+    let (base_url, handle) = spawn_stub(vec![http_response(
+        200,
+        "OK",
+        &[],
+        r#"{"data":{"post_id":"123456","status":"rejected","workflow":{"id":"42","name":"Content approval"},"current_step":null,"steps":[{"order":1,"name":"Client approval","require_mode":"all","status":"rejected","approvers":[{"id":"c4a09e1d","name":"Jordan","email":null,"status":"rejected","decided_at":"2026-10-01T14:30:00.000Z","comment":"Wrong product photo"}]}],"rejection":{"by":{"id":"c4a09e1d","name":"Jordan"},"reason":"Wrong product photo","at":"2026-10-01T14:30:00.000Z","step":1},"comments":[]}}"#,
+    )]);
+
+    let client = client_for(&base_url, 0);
+    let result = client.posts().get_approval("123456").await.unwrap();
+    assert_eq!(result["data"]["status"], "rejected");
+    assert!(result["data"]["current_step"].is_null());
+    assert_eq!(result["data"]["steps"][0]["approvers"][0]["status"], "rejected");
+    assert_eq!(result["data"]["rejection"]["by"]["id"], "c4a09e1d");
+    assert_eq!(result["data"]["rejection"]["reason"], "Wrong product photo");
+
+    let captured = handle.join().unwrap();
+    assert!(captured[0].starts_with("GET /posts/123456/approval HTTP/1.1"), "{}", captured[0]);
+}
+
+#[tokio::test]
 async fn inbox_hide_posts_the_hide_flag() {
     let (base_url, handle) = spawn_stub(vec![http_response(
         200,

@@ -50,6 +50,32 @@ fn valid_signature_passes_and_returns_parsed_event() {
 }
 
 #[test]
+fn rejected_event_keeps_its_approval_object() {
+    let payload = r#"{"id":"evt_2","type":"post.rejected","created_at":"2026-10-02T09:00:05.000Z","data":{"post_id":"123456","workspace_id":789,"status":"rejected","post_type":"Post","scheduled_at":"2026-10-03T14:00:00.000Z","published_at":null,"targets":[],"approval":{"status":"rejected","decided_by":"c4a09e1d","reason":"Wrong product photo"}}}"#;
+    let header = sign(SECRET, now(), payload);
+    let event =
+        verify_signature(payload.as_bytes(), &header, SECRET, DEFAULT_TOLERANCE_SECS).unwrap();
+
+    assert_eq!(event["type"], "post.rejected");
+    assert_eq!(event["data"]["approval"]["status"], "rejected");
+    assert_eq!(event["data"]["approval"]["decided_by"], "c4a09e1d");
+    assert_eq!(event["data"]["approval"]["reason"], "Wrong product photo");
+    assert_eq!(event["data"]["targets"], serde_json::json!([]));
+}
+
+#[test]
+fn approved_event_has_a_null_reason() {
+    let payload = r#"{"id":"evt_3","type":"post.approved","data":{"post_id":"123456","status":"scheduled","targets":[],"approval":{"status":"approved","decided_by":"c4a09e1d","reason":null}}}"#;
+    let header = sign(SECRET, now(), payload);
+    let event =
+        verify_signature(payload.as_bytes(), &header, SECRET, DEFAULT_TOLERANCE_SECS).unwrap();
+
+    assert_eq!(event["type"], "post.approved");
+    assert_eq!(event["data"]["approval"]["status"], "approved");
+    assert!(event["data"]["approval"]["reason"].is_null());
+}
+
+#[test]
 fn tampered_payload_fails() {
     let header = sign(SECRET, now(), PAYLOAD);
     let tampered = PAYLOAD.replace("post.published", "post.failed");

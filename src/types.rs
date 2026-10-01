@@ -765,7 +765,8 @@ pub struct NextUnansweredParams {
 pub struct CreateWebhookParams {
     /// HTTPS endpoint that will receive event deliveries.
     pub url: String,
-    /// Events to subscribe to: `post.scheduled`, `post.published`, `post.failed`.
+    /// Events to subscribe to: `post.scheduled`, `post.published`,
+    /// `post.failed`, `post.approved`, `post.rejected`.
     pub events: Vec<String>,
 }
 

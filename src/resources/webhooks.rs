@@ -25,8 +25,9 @@ impl Webhooks<'_> {
     }
 
     /// `POST /webhooks` - register an endpoint for event deliveries
-    /// (`post.scheduled`, `post.published`, `post.failed`). The response
-    /// includes the signing `secret`; save it, it is only shown once.
+    /// (`post.scheduled`, `post.published`, `post.failed`, `post.approved`,
+    /// `post.rejected`). The response includes the signing `secret`; save
+    /// it, it is only shown once.
     pub async fn create(&self, params: CreateWebhookParams) -> Result<Value, Error> {
         self.client.post_json("/webhooks", &params).await
     }
