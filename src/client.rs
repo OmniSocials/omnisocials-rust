@@ -15,7 +15,7 @@ use serde_json::Value;
 use crate::error::Error;
 use crate::resources::{
     Accounts, Analytics, ApprovalWorkflows, Audio, Folders, HashtagSets, Inbox, Locations, Media,
-    Posts, Webhooks,
+    Pinterest, Posts, Webhooks,
 };
 
 /// Crate version, used in the `User-Agent` header.
@@ -223,6 +223,12 @@ impl Client {
     /// Instagram Reels licensed audio (Meta catalog): search.
     pub fn audio(&self) -> Audio<'_> {
         Audio { client: self }
+    }
+
+    /// Pinterest product Pins for product tagging: list_products,
+    /// validate_product.
+    pub fn pinterest(&self) -> Pinterest<'_> {
+        Pinterest { client: self }
     }
 
     /// Webhook endpoint management: list, get, create, update, delete,

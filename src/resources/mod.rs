@@ -10,6 +10,7 @@ mod hashtag_sets;
 mod inbox;
 mod locations;
 mod media;
+mod pinterest;
 mod posts;
 mod webhooks;
 
@@ -22,5 +23,6 @@ pub use hashtag_sets::HashtagSets;
 pub use inbox::Inbox;
 pub use locations::Locations;
 pub use media::Media;
+pub use pinterest::Pinterest;
 pub use posts::Posts;
 pub use webhooks::Webhooks;

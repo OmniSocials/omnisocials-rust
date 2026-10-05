@@ -680,6 +680,42 @@ client.posts().create(CreatePostParams {
 }).await?;
 ```
 
+## Pinterest product tags
+
+Tag products on a Pin so people can shop the items in the image. `client.pinterest().list_products(...)` returns the product Pins of the connected Pinterest account; pass their `pin_id` values (max 24) as `product_tags` in the `pinterest` options of the post. Only product Pins of your own account can be tagged; products of other merchants cannot. The tags are added right after the Pin is published. A product that Pinterest refuses never fails the post: the outcome is on the post as `pinterest.product_tags_result` (`requested`, `tagged`, `skipped`, `error`).
+
+```rust
+use omnisocials::ListPinterestProductsParams;
+
+let result = client.pinterest().list_products(ListPinterestProductsParams::default()).await?;
+
+if let Some(error) = result.get("error") {
+    // HTTP 200 without "products": pinterest_not_connected,
+    // pinterest_catalog_access_required or platform_error
+    eprintln!("{}: {}", error["code"], error["message"]);
+} else {
+    let product_tags: Vec<&str> = result["products"]
+        .as_array()
+        .map(|products| products.iter().filter_map(|product| product["pin_id"].as_str()).take(3).collect())
+        .unwrap_or_default();
+
+    client.posts().create(CreatePostParams {
+        content: "Our summer picks".into(),
+        channels: Some(vec!["pinterest".into()]),
+        media_urls: Some(vec!["https://example.com/summer-look.jpg"].into()),
+        scheduled_at: Some("2026-08-01T09:00:00Z".into()),
+        pinterest: Some(json!({
+            "board_id": "1234567890",
+            "title": "Summer picks",
+            "product_tags": product_tags,
+        })),
+        ..Default::default()
+    }).await?;
+}
+```
+
+Without `source` the list reads the Pinterest catalog (with `price`, `currency`, `availability` and `item_id`) when the connection has catalog access, else the account's own Pins. Catalog access is given one time in the OmniSocials composer: Pinterest options, Add products, Connect catalog. `source: Some("pins".into())` scans up to 250 Pins per call, so `products` can be empty while `bookmark` is set; call again with the bookmark in `ListPinterestProductsParams.bookmark`. To check one Pin id or Pin link before you post, call `client.pinterest().validate_product("813744226420795884").await?`. On `posts().update` the `pinterest` value replaces the stored one, so leave `product_tags` out to remove the tags.
+
 ## Webhooks
 
 Events: `post.scheduled`, `post.published`, `post.failed`, `post.approved` (the last step of a post's approval workflow is approved) and `post.rejected` (an approver rejects the post; it will not publish). The two approval events carry `data.approval` with `status`, `decided_by` (the approver's user id) and `reason` (`null` on `post.approved`), and an empty `data.targets`.

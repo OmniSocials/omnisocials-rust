@@ -50,7 +50,8 @@ pub use error::Error;
 pub use types::{
     AccountAnalyticsParams, AnalyticsOverviewParams, BestTimesParams, CheckMediaParams, Content,
     CreateFolderParams, CreateHashtagSetParams, CreatePostParams, CreateWebhookParams,
-    GetMessagesParams, Hashtags, ListConversationsParams, ListMediaParams, ListPostsParams,
+    GetMessagesParams, Hashtags, ListConversationsParams, ListMediaParams,
+    ListPinterestProductsParams, ListPostsParams,
     MediaEntry, MediaRefs, NextUnansweredParams, RecentPlatformPostsParams, ReplyParams,
     SearchLocationsParams, UpdateFolderParams, UpdateHashtagSetParams, UpdateMediaParams,
     UpdatePostParams,

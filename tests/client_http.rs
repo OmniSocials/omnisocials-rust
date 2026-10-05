@@ -6,7 +6,10 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread::JoinHandle;
 
-use omnisocials::{Client, CreatePostParams, Error, ListPostsParams, SearchLocationsParams};
+use omnisocials::{
+    Client, CreatePostParams, Error, ListPinterestProductsParams, ListPostsParams,
+    SearchLocationsParams,
+};
 
 // ─── Stub server ─────────────────────────────────────────────────────────────
 
@@ -221,6 +224,67 @@ async fn locations_search_with_builds_platform_and_coordinate_queries() {
         "{}",
         captured[1]
     );
+}
+
+#[tokio::test]
+async fn pinterest_list_products_builds_the_query_and_validate_sends_the_id() {
+    let (base_url, handle) = spawn_stub(vec![
+        http_response(
+            200,
+            "OK",
+            &[],
+            r#"{"products":[{"pin_id":"813744226420795884","price":24.99}],"bookmark":null,"source":"catalog","catalog_access":true}"#,
+        ),
+        http_response(
+            200,
+            "OK",
+            &[],
+            r#"{"error":{"code":"pinterest_not_connected","message":"No Pinterest account is connected."}}"#,
+        ),
+        http_response(200, "OK", &[], r#"{"valid":true,"pin_id":"813744226420795884"}"#),
+    ]);
+
+    let client = client_for(&base_url, 0);
+    let list = client
+        .pinterest()
+        .list_products(ListPinterestProductsParams {
+            source: Some("catalog".into()),
+            product_group_id: Some("443727193917".into()),
+            bookmark: Some("abc".into()),
+            page_size: Some(50),
+        })
+        .await
+        .unwrap();
+    let not_connected = client
+        .pinterest()
+        .list_products(ListPinterestProductsParams::default())
+        .await
+        .unwrap();
+    let check = client.pinterest().validate_product("813744226420795884").await.unwrap();
+
+    let captured = handle.join().unwrap();
+    assert!(
+        captured[0].starts_with(
+            "GET /pinterest/products?source=catalog&product_group_id=443727193917&bookmark=abc&page_size=50 HTTP/1.1"
+        ),
+        "{}",
+        captured[0]
+    );
+    assert_eq!(list["products"][0]["pin_id"], "813744226420795884");
+    assert_eq!(list["catalog_access"], true);
+
+    // Default params send no query. A list that could not be read is HTTP 200
+    // with an error object and no products.
+    assert!(captured[1].starts_with("GET /pinterest/products HTTP/1.1"), "{}", captured[1]);
+    assert!(not_connected.get("products").is_none());
+    assert_eq!(not_connected["error"]["code"], "pinterest_not_connected");
+
+    assert!(
+        captured[2].starts_with("GET /pinterest/products/validate?id=813744226420795884 HTTP/1.1"),
+        "{}",
+        captured[2]
+    );
+    assert_eq!(check["valid"], true);
 }
 
 #[tokio::test]

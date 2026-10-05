@@ -226,6 +226,14 @@ pub struct CreatePostParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_workflow_id: Option<String>,
     /// Pinterest options (e.g. `json!({"board_id": "...", "title": "..."})`).
+    /// `product_tags` tags products on the Pin: up to 24 product Pins of the
+    /// connected Pinterest account, each as a Pin id string (see
+    /// `client.pinterest().list_products`) or a Pin link. Products of other
+    /// merchants cannot be tagged. The tags are added right after the Pin is
+    /// published; a product Pinterest refuses never fails the post, and the
+    /// post's `pinterest` block then carries `product_tags_result`
+    /// (`requested`, `tagged`, `skipped`, `error`). More than 24 entries or
+    /// an invalid entry returns `400 validation_error`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinterest: Option<Value>,
     /// YouTube options (e.g. `json!({"title": "...", "privacy": "public"})`).
@@ -334,7 +342,8 @@ pub struct UpdatePostParams {
     /// Instagram user tags positioned on the image(s).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_tags: Option<Vec<UserTag>>,
-    /// Pinterest options.
+    /// Pinterest options. Replaces the stored Pinterest options wholesale,
+    /// so leave `product_tags` out (or send `[]`) to remove the product tags.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinterest: Option<Value>,
     /// YouTube options.
@@ -657,6 +666,26 @@ pub struct SearchLocationsParams {
     pub latitude: Option<f64>,
     /// Longitude (-180..180). Threads only; pair with `latitude` instead of `q`.
     pub longitude: Option<f64>,
+}
+
+// ─── Pinterest ───────────────────────────────────────────────────────────────
+
+/// Query for `GET /pinterest/products`
+/// (see [`crate::resources::Pinterest::list_products`]). Every field is
+/// optional.
+#[derive(Debug, Clone, Default)]
+pub struct ListPinterestProductsParams {
+    /// Where to read product Pins from: `"catalog"` (the Pinterest catalog,
+    /// needs catalog access) or `"pins"` (the account's own Pins). Default:
+    /// `"catalog"` when the connection has catalog access, else `"pins"`.
+    pub source: Option<String>,
+    /// Catalog source only. A product group `id` from `product_groups`.
+    /// Default: the group named "All Products", else the first group.
+    pub product_group_id: Option<String>,
+    /// Cursor from the previous response's `bookmark`, to get the next page.
+    pub bookmark: Option<String>,
+    /// Catalog source only. Products per page (1..100, default 25).
+    pub page_size: Option<u32>,
 }
 
 // ─── Inbox ───────────────────────────────────────────────────────────────────
