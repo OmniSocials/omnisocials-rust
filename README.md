@@ -539,7 +539,7 @@ let best = client.analytics().best_times(BestTimesParams {
 
 ## Inbox
 
-Read and reply to social conversations, DMs, comments, and mentions, across Instagram, Facebook, LinkedIn, TikTok (video comments only), YouTube (video comments only), X, and Threads. TikTok and YouTube replies are comments only; TikTok replies are capped at 150 characters. Threads conversations are `type` `"comment"` (replies people leave on your Threads posts; conversation ids look like `threads_comment_<rootPostId>`) and `"mention"` (`threads_mention_<postId>`); there are no Threads DMs, and a reply publishes as a native Threads reply. The Threads inbox is currently rolling out; until Meta approves the permissions it is disabled on production and calls return a clear error, and it needs a Threads connection with the reply permission (a connection without it fails with `Error::Auth`, status 401, code `reauth_required`; reconnect Threads to fix it).
+Read and reply to social conversations, DMs, comments, and mentions, across Instagram, Facebook, LinkedIn, TikTok (video comments only), YouTube (video comments only), X, and Threads. TikTok and YouTube replies are comments only; TikTok replies are capped at 150 characters. Threads conversations are `type` `"comment"` (replies people leave on your Threads posts; conversation ids look like `threads_comment_<rootPostId>`) and `"mention"` (`threads_mention_<postId>`); there are no Threads DMs, and a reply publishes as a native Threads reply. The Threads inbox needs a Threads connection with the reply permission (a connection without it fails with `Error::Auth`, status 401, code `reauth_required`; reconnect Threads to fix it, an account connected before 2026-09-14 needs this once).
 
 ```rust
 use omnisocials::{ListConversationsParams, ReplyParams};
@@ -549,7 +549,7 @@ let conversations = client.inbox().list_conversations(ListConversationsParams {
     unread: Some(true),
     ..Default::default()
 }).await?;
-let conversation_id = conversations["data"][0]["id"].as_str().unwrap();
+let conversation_id = conversations["data"][0]["conversation_id"].as_str().unwrap();
 
 let messages = client.inbox().get_messages(conversation_id, Default::default()).await?;
 client.inbox().mark_read(conversation_id).await?;
