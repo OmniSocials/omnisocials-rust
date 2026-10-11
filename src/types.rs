@@ -225,6 +225,42 @@ pub struct CreatePostParams {
     /// `404 workflow_not_found`, `400 validation_error`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_workflow_id: Option<String>,
+    /// Planned draft. With `scheduled_at`, the post is stored as `draft` and
+    /// keeps that time: it shows on the dashboard calendar at that slot with
+    /// a dashed outline, the scheduler never publishes it, and a person
+    /// schedules it from the composer (or you do with `posts().update` and
+    /// `draft: Some(false)`). Use it when an agent proposes a slot that a
+    /// human should confirm. Not allowed with `publish_now` or
+    /// `approval_workflow_id` (`400 validation_error`). Without
+    /// `scheduled_at` it changes nothing: that post is a draft already.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draft: Option<bool>,
+    /// Image fit per channel for feed images whose ratio is outside what a
+    /// channel shows uncropped, keyed by platform id (`"instagram"`,
+    /// `"pinterest"`, ...), each `"auto"`, `"crop"` or `"keep"`. `auto`
+    /// (default): Instagram crops a tall or wide image to 4:5 / 1.91:1
+    /// around the subject (Instagram cuts it to that window anyway and Meta
+    /// cannot boost a feed post outside it); Pinterest keeps a Pin taller
+    /// than 2:3 and reports it. `crop` / `keep` force it per channel.
+    /// Decisions come back in the response's `warnings` with code
+    /// `image_fit`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_fit: Option<HashMap<String, String>>,
+    /// Comment-to-DM automation bound to this post (Instagram must be in
+    /// `channels`): a keyword in a comment is answered with a DM, once per
+    /// person, with an optional public reply under the comment. E.g.
+    /// `json!({"trigger": {"keywords": ["guide"], "match": "word"},
+    /// "actions": {"dm": {"text": "..."}, "public_reply": {"enabled": true,
+    /// "variations": ["..."]}}, "limits": {"max_sends": 500}})` (see
+    /// [`CreateAutomationParams`] for the fields). Needs the
+    /// `automations:write` scope on the key (`403 insufficient_scope`,
+    /// checked before anything else); a bad object is a
+    /// `400 validation_error` whose message starts with
+    /// `comment_dm_automation: `. The response then carries
+    /// `data.comment_dm_automation` (the automation, with `post` null); it
+    /// starts listening once the post is live on Instagram.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment_dm_automation: Option<Value>,
     /// Pinterest options (e.g. `json!({"board_id": "...", "title": "..."})`).
     /// `product_tags` tags products on the Pin: up to 24 product Pins of the
     /// connected Pinterest account, each as a Pin id string (see
@@ -319,6 +355,26 @@ pub struct UpdatePostParams {
     /// New ISO 8601 schedule time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduled_at: Option<String>,
+    /// Planned-draft switch. `Some(false)` without `scheduled_at` schedules
+    /// a draft at the time it already carries (`400 validation_error` when
+    /// it has none or it is in the past). `Some(true)` without
+    /// `scheduled_at` unschedules a scheduled post: it keeps its time and
+    /// stays on the calendar as a dashed draft, nothing publishes; a post
+    /// waiting for approval leaves its workflow. `Some(true)` with
+    /// `scheduled_at` moves the time and keeps (or makes) the post a draft.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draft: Option<bool>,
+    /// Image fit per channel (same shape as [`CreatePostParams::media_fit`]).
+    /// On update, `media_fit` alone re-decides the stored images (`keep`
+    /// gives the original back). Decisions come back in the response's
+    /// `warnings` with code `image_fit`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_fit: Option<HashMap<String, String>>,
+    /// Replaces the post's comment-to-DM automation (same shape as
+    /// [`CreatePostParams::comment_dm_automation`]). `json!(null)` removes
+    /// it; omit to leave it untouched. Needs the `automations:write` scope.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment_dm_automation: Option<Value>,
     /// New platform identifiers list.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channels: Option<Vec<String>>,
@@ -686,6 +742,104 @@ pub struct ListPinterestProductsParams {
     pub bookmark: Option<String>,
     /// Catalog source only. Products per page (1..100, default 25).
     pub page_size: Option<u32>,
+}
+
+// ─── Automations (comment-to-DM) ─────────────────────────────────────────────
+
+/// Query for `GET /automations`
+/// (see [`crate::resources::Automations::list`]). Every field is optional.
+#[derive(Debug, Clone, Default)]
+pub struct ListAutomationsParams {
+    /// `"active"`, `"paused"` or `"completed"`.
+    pub status: Option<String>,
+    /// Only the automation bound to this OmniSocials post.
+    pub post_id: Option<String>,
+}
+
+/// Query for `GET /automations/:id/events`
+/// (see [`crate::resources::Automations::list_events`]). Every field is
+/// optional.
+#[derive(Debug, Clone, Default)]
+pub struct ListAutomationEventsParams {
+    /// `"sent"`, `"skipped"`, `"failed"` or `"pending"`.
+    pub outcome: Option<String>,
+    /// Events per page, 1 to 100 (default 25).
+    pub limit: Option<u32>,
+    /// Events to skip.
+    pub offset: Option<u32>,
+}
+
+/// Body for `POST /automations`
+/// (see [`crate::resources::Automations::create`]).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CreateAutomationParams {
+    /// Name, max 120 characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// For scope `post`: an OmniSocials post that goes to Instagram
+    /// (scheduled or live). One automation per post. Set `post_id` OR
+    /// `instagram_media_id`, not both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_id: Option<String>,
+    /// For scope `post`: a post published outside OmniSocials (numeric
+    /// Instagram media id).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instagram_media_id: Option<String>,
+    /// `json!({"kinds": ["comment"], "scope": "post", "keywords": ["guide"],
+    /// "match": "word"})`: `kinds` one or more of `comment`, `dm`,
+    /// `story_reply` (default `["comment"]`); `scope` `post` (default),
+    /// `next_post` (the next Instagram post the workspace publishes) or
+    /// `any` (every post); `keywords` up to 20 of 60 characters, required
+    /// unless `match` is `any`; `match` `word` (default), `contains` or
+    /// `any`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<Value>,
+    /// Required: `json!({"dm": {"text": "..."}})` (max 1000 characters) plus
+    /// an optional `"public_reply": {"enabled": true, "variations": [...]}`
+    /// (comment kind only, up to 10 variations of 300 characters).
+    pub actions: Value,
+    /// `json!({"max_sends": 500, "stop_at": "2026-12-31T00:00:00Z"})`, both
+    /// optional.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Value>,
+    /// `"active"` (default) or `"paused"` (create as paused).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+/// Body for `PATCH /automations/:id`
+/// (see [`crate::resources::Automations::update`]). Every field is
+/// optional; a body with nothing is a `400 no_fields`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct UpdateAutomationParams {
+    /// New name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Moves the automation to that OmniSocials post.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_id: Option<String>,
+    /// Moves the automation to that Instagram post.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instagram_media_id: Option<String>,
+    /// Merged into the stored trigger (see
+    /// [`CreateAutomationParams::trigger`]): keys you omit keep their value,
+    /// so new `keywords` keep the kinds, the scope and the match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<Value>,
+    /// Merged into the stored actions (see
+    /// [`CreateAutomationParams::actions`]): a new `dm.text` keeps the
+    /// public reply; `"public_reply": {"enabled": false}` or
+    /// `{"variations": []}` turns it off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actions: Option<Value>,
+    /// Merged into the stored limits (see
+    /// [`CreateAutomationParams::limits`]): `json!({"stop_at": "..."})`
+    /// keeps `max_sends`; `json!({"max_sends": null})` removes that limit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Value>,
+    /// `"paused"` pauses, `"active"` resumes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 // ─── Inbox ───────────────────────────────────────────────────────────────────

@@ -49,12 +49,13 @@ pub use client::{Client, ClientBuilder, VERSION};
 pub use error::Error;
 pub use types::{
     AccountAnalyticsParams, AnalyticsOverviewParams, BestTimesParams, CheckMediaParams, Content,
-    CreateFolderParams, CreateHashtagSetParams, CreatePostParams, CreateWebhookParams,
-    GetMessagesParams, Hashtags, ListConversationsParams, ListMediaParams,
+    CreateAutomationParams, CreateFolderParams, CreateHashtagSetParams, CreatePostParams,
+    CreateWebhookParams, GetMessagesParams, Hashtags, ListAutomationEventsParams,
+    ListAutomationsParams, ListConversationsParams, ListMediaParams,
     ListPinterestProductsParams, ListPostsParams,
     MediaEntry, MediaRefs, NextUnansweredParams, RecentPlatformPostsParams, ReplyParams,
-    SearchLocationsParams, UpdateFolderParams, UpdateHashtagSetParams, UpdateMediaParams,
-    UpdatePostParams,
+    SearchLocationsParams, UpdateAutomationParams, UpdateFolderParams, UpdateHashtagSetParams,
+    UpdateMediaParams, UpdatePostParams,
     UpdateWebhookParams, UploadMediaFromBase64Params, UploadMediaFromUrlParams, UploadMediaParams,
     UserTag,
 };

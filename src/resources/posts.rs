@@ -66,6 +66,12 @@ impl Posts<'_> {
     /// `error.details`. Drafts (no `scheduled_at`) are never gated, and
     /// neither is any post publishing before 2026-08-14. The same gate
     /// applies to [`Self::update`] and [`Self::publish`].
+    ///
+    /// The same `warnings` array carries one `image_fit` entry per channel
+    /// decision on a feed image whose ratio is outside what the channel
+    /// shows uncropped (`action` is `cropped`, `kept` or `crop_failed`, with
+    /// `platform`, `media_url`, `ratio`, `target` and `crop_url`);
+    /// `media_fit` on the params steers it per channel.
     pub async fn create(&self, params: CreatePostParams) -> Result<Value, Error> {
         self.client.post_json("/posts/create", &params).await
     }
@@ -79,7 +85,11 @@ impl Posts<'_> {
 
     /// `PATCH /posts/:id` - update a draft or scheduled post. For X posts
     /// this can fail with `402 x_credits_insufficient` under the same
-    /// credit-reservation gate as [`Self::create`].
+    /// credit-reservation gate as [`Self::create`]. Like [`Self::create`],
+    /// the response can carry a top-level `warnings` array: `image_fit`
+    /// entries when the update changes the images or `media_fit`
+    /// (`media_fit` alone re-decides the stored images; `keep` gives the
+    /// original back).
     pub async fn update(&self, id: &str, params: UpdatePostParams) -> Result<Value, Error> {
         self.client
             .patch_json(&format!("/posts/{}", encode_path_segment(id)), &params)

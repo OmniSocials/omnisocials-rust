@@ -94,7 +94,17 @@ impl Media<'_> {
 
     /// `POST /media/check` - preflight a file's compatibility with the
     /// workspace's connected platforms BEFORE uploading. Provide one of: a
-    /// public `url`, an existing `media_id`, or `size_bytes` + `mime`.
+    /// public `url`, an existing `media_id`, or `size_bytes` + `mime`. The
+    /// body carries `file` (`size_bytes`, `mime`, `size_known`, `width`,
+    /// `height`; the pixel size is known for library images, null
+    /// otherwise), `connected_platforms`, `compatible`, `warnings`, `summary`
+    /// and `fit`: one entry per connected channel with a fit rule for an
+    /// IMAGE as a feed post (`platform`, `display_name`, `fits`, `ratio`,
+    /// `shown` = `"whole"` | `"cut"`, `target`, `default_action` = `"crop"` |
+    /// `"keep"` | null, `message`). `fits: false` = the ratio is outside the
+    /// window the channel shows uncropped; `default_action` is what a post
+    /// create does unless the post's `media_fit` says otherwise. Empty for
+    /// videos and unknown sizes.
     pub async fn check(&self, params: CheckMediaParams) -> Result<Value, Error> {
         self.client.post_json("/media/check", &params).await
     }

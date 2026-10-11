@@ -107,6 +107,65 @@ client.posts().create(CreatePostParams {
 }).await?;
 ```
 
+### Planned drafts
+
+Set `draft: Some(true)` with `scheduled_at` to store the post as a draft that keeps its time. It shows on the dashboard calendar at that slot with a dashed outline and the scheduler never publishes it: a person schedules it from the composer, or you do with `update` and `draft: Some(false)`. Use it when an agent proposes a slot that a human should confirm. A draft is not allowed with `publish_now` or `approval_workflow_id` (`400 validation_error`). On `update`, `draft: Some(false)` without `scheduled_at` is a `400 validation_error` when the draft has no time or its time is in the past (pass a new `scheduled_at` then), and `draft: Some(true)` on a scheduled post unschedules it while keeping the time.
+
+```rust
+use omnisocials::{CreatePostParams, UpdatePostParams};
+
+let proposal = client.posts().create(CreatePostParams {
+    content: "Proposed for Friday morning".into(),
+    channels: Some(vec!["instagram".into(), "linkedin".into()]),
+    scheduled_at: Some("2026-08-01T09:00:00Z".into()),
+    draft: Some(true),
+    ..Default::default()
+}).await?;
+println!("{} {}", proposal["data"]["status"], proposal["data"]["schedule_at"]); // draft, the time is kept
+
+// The human agrees: schedule it at the time it already carries
+let id = proposal["data"]["id"].as_str().unwrap();
+client.posts().update(id, UpdatePostParams { draft: Some(false), ..Default::default() }).await?;
+```
+
+### Comment-to-DM automations
+
+Answer a keyword in an Instagram comment with a DM, once per person, with an optional public reply under the comment. Set `comment_dm_automation` on `create` (Instagram must be in `channels`) and the automation is bound to that post; it starts listening once the post is live. Needs the opt-in `automations:write` scope on the key. `client.automations()` manages the automations themselves (`list`, `get`, `create`, `update`, `delete`) and reads their activity (`list_events`, `automations:read`). On `update`, `comment_dm_automation: Some(json!({...}))` replaces the post's automation and `Some(json!(null))` removes it. Instagram rules: one private reply per comment, within 7 days; OmniSocials caps sends at 180 DMs an hour per account.
+
+```rust
+use omnisocials::{CreatePostParams, ListAutomationEventsParams};
+use serde_json::json;
+
+let post = client.posts().create(CreatePostParams {
+    content: "Comment GUIDE and I will send you the link".into(),
+    channels: Some(vec!["instagram".into()]),
+    scheduled_at: Some("2026-08-01T09:00:00Z".into()),
+    media_urls: Some(vec!["https://example.com/guide-cover.jpg"].into()),
+    comment_dm_automation: Some(json!({
+        "trigger": { "keywords": ["guide"], "match": "word" },
+        "actions": {
+            "dm": { "text": "Here is the guide: https://example.com/guide" },
+            "public_reply": { "enabled": true, "variations": ["Sent you a DM!", "Check your inbox"] }
+        },
+        "limits": { "max_sends": 500 }
+    })),
+    ..Default::default()
+}).await?;
+let automation_id = post["data"]["comment_dm_automation"]["id"].as_str().unwrap();
+
+// Later: who was answered, and why someone was skipped
+let events = client.automations().list_events(automation_id, ListAutomationEventsParams {
+    outcome: Some("sent".into()),
+    ..Default::default()
+}).await?;
+println!("{}", events["counts"]); // {"sent":12,"skipped":3}
+for event in events["data"].as_array().unwrap() {
+    println!("{} {}", event["person"]["username"], event["outcome"]);
+}
+```
+
+The events response is `data`, `counts` and `pagination`, not the plain list: `counts` is the number of events per outcome (`sent`, `skipped`, `failed`, `pending`). An automation can also listen on a post published outside OmniSocials (`client.automations().create(CreateAutomationParams { instagram_media_id: Some(...), actions: json!({...}), ..Default::default() })`), on the next post the workspace publishes (`trigger: Some(json!({"scope": "next_post"}))`) or on every post (`"scope": "any"`), and on DMs and story replies (`"kinds": ["dm", "story_reply"]`).
+
 ### Publish immediately
 
 ```rust
@@ -836,7 +895,7 @@ The `err.status()`, `err.code()`, and `err.retry_after()` accessors work across 
 
 ## API scopes
 
-Each API key carries scopes: `posts:read`, `posts:write`, `media:write`, `accounts:read`, `analytics:read`, `webhooks:manage`. A call with a missing scope returns `Error::PermissionDenied` with code `insufficient_scope`.
+Each API key carries scopes: `posts:read`, `posts:write`, `media:write`, `accounts:read`, `analytics:read`, `webhooks:manage`, plus the opt-in `automations:read` / `automations:write` for comment-to-DM automations. A call with a missing scope returns `Error::PermissionDenied` with code `insufficient_scope`.
 
 ## Documentation
 

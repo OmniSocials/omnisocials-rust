@@ -14,8 +14,8 @@ use serde_json::Value;
 
 use crate::error::Error;
 use crate::resources::{
-    Accounts, Analytics, ApprovalWorkflows, Audio, Folders, HashtagSets, Inbox, Locations, Media,
-    Pinterest, Posts, Webhooks,
+    Accounts, Analytics, ApprovalWorkflows, Audio, Automations, Folders, HashtagSets, Inbox,
+    Locations, Media, Pinterest, Posts, Webhooks,
 };
 
 /// Crate version, used in the `User-Agent` header.
@@ -229,6 +229,12 @@ impl Client {
     /// validate_product.
     pub fn pinterest(&self) -> Pinterest<'_> {
         Pinterest { client: self }
+    }
+
+    /// Comment-to-DM automations: list, get, create, update, delete,
+    /// list_events.
+    pub fn automations(&self) -> Automations<'_> {
+        Automations { client: self }
     }
 
     /// Webhook endpoint management: list, get, create, update, delete,

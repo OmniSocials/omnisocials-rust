@@ -4,9 +4,9 @@
 use std::collections::HashMap;
 
 use omnisocials::{
-    CheckMediaParams, Content, CreateHashtagSetParams, CreatePostParams, MediaEntry, MediaRefs,
-    UpdateFolderParams, UpdateHashtagSetParams, UpdateMediaParams, UpdatePostParams,
-    UpdateWebhookParams, UserTag,
+    CheckMediaParams, Content, CreateAutomationParams, CreateHashtagSetParams, CreatePostParams,
+    MediaEntry, MediaRefs, UpdateAutomationParams, UpdateFolderParams, UpdateHashtagSetParams,
+    UpdateMediaParams, UpdatePostParams, UpdateWebhookParams, UserTag,
 };
 use serde_json::{json, Value};
 
@@ -140,6 +140,49 @@ fn update_post_params_default_is_empty_object() {
 }
 
 #[test]
+fn post_params_draft_false_survives() {
+    // A planned draft is scheduled with draft: false, so the false must be
+    // sent; only None is skipped.
+    let update = serde_json::to_value(UpdatePostParams {
+        draft: Some(false),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(update, json!({ "draft": false }));
+    let create = serde_json::to_value(CreatePostParams {
+        content: "Proposed for Friday".into(),
+        scheduled_at: Some("2026-08-01T09:00:00Z".into()),
+        draft: Some(true),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(create["draft"], true);
+}
+
+#[test]
+fn post_params_media_fit_is_a_per_channel_map() {
+    let mut media_fit = std::collections::HashMap::new();
+    media_fit.insert("instagram".to_owned(), "keep".to_owned());
+    media_fit.insert("pinterest".to_owned(), "crop".to_owned());
+    let update = serde_json::to_value(UpdatePostParams {
+        media_fit: Some(media_fit.clone()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(update, json!({ "media_fit": { "instagram": "keep", "pinterest": "crop" } }));
+    let create = serde_json::to_value(CreatePostParams {
+        content: "Tall product shot".into(),
+        media_fit: Some(media_fit),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(create["media_fit"]["instagram"], "keep");
+    // None is skipped, like every other optional field.
+    let bare = serde_json::to_value(UpdatePostParams::default()).unwrap();
+    assert!(bare.get("media_fit").is_none());
+}
+
+#[test]
 fn update_post_params_thread_parts_null_survives() {
     let params = UpdatePostParams {
         x: Some(json!({"thread_parts": null})),
@@ -245,6 +288,60 @@ fn hashtag_set_params_serialize_both_shapes() {
     })
     .unwrap();
     assert_eq!(updated, json!({"hashtags": "#a #b"}));
+}
+
+#[test]
+fn automation_params_serialize() {
+    // Create: actions is required, None fields are dropped.
+    let created = serde_json::to_value(CreateAutomationParams {
+        post_id: Some("12345".into()),
+        trigger: Some(json!({"keywords": ["guide"], "match": "word"})),
+        actions: json!({"dm": {"text": "Here is the guide"}}),
+        limits: Some(json!({"max_sends": 500})),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        created,
+        json!({
+            "post_id": "12345",
+            "trigger": {"keywords": ["guide"], "match": "word"},
+            "actions": {"dm": {"text": "Here is the guide"}},
+            "limits": {"max_sends": 500}
+        })
+    );
+
+    // Update: a pause sends status alone.
+    let paused = serde_json::to_value(UpdateAutomationParams {
+        status: Some("paused".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(paused, json!({"status": "paused"}));
+}
+
+#[test]
+fn post_params_comment_dm_automation_serializes_and_null_removes() {
+    let create = serde_json::to_value(CreatePostParams {
+        content: "Comment GUIDE".into(),
+        comment_dm_automation: Some(json!({
+            "trigger": {"keywords": ["guide"]},
+            "actions": {"dm": {"text": "Here is the guide"}}
+        })),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(create["comment_dm_automation"]["actions"]["dm"]["text"], "Here is the guide");
+
+    // On update, json!(null) removes the automation; None leaves it out.
+    let remove = serde_json::to_value(UpdatePostParams {
+        comment_dm_automation: Some(Value::Null),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(remove, json!({"comment_dm_automation": null}));
+    let untouched = serde_json::to_value(UpdatePostParams::default()).unwrap();
+    assert!(untouched.get("comment_dm_automation").is_none());
 }
 
 #[test]
