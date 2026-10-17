@@ -67,7 +67,7 @@ pub struct ClientBuilder {
 }
 
 impl ClientBuilder {
-    /// API key (`omsk_live_*` / `omsk_test_*`). Wins over the
+    /// API key (`omsk_live_*`). Wins over the
     /// `OMNISOCIALS_API_KEY` environment variable.
     pub fn api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());

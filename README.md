@@ -1,6 +1,6 @@
 # OmniSocials Rust SDK
 
-The official Rust client for the [OmniSocials API](https://docs.omnisocials.com). Schedule and publish posts to Instagram, Facebook, LinkedIn, YouTube, TikTok, X, Pinterest, Bluesky, Threads, Mastodon, and Google Business from one API.
+The official Rust SDK for OmniSocials: post, schedule, reply and report on 11 social platforms (Instagram, Facebook, LinkedIn, X, TikTok, YouTube, Threads, Pinterest, Bluesky, Mastodon and Google Business) from one API. Guide: [omnisocials.com/sdk/rust](https://omnisocials.com/sdk/rust)
 
 - Async-first, built on `reqwest` with rustls (no OpenSSL needed)
 - Typed request params with serde, responses as `serde_json::Value`
@@ -40,7 +40,7 @@ async fn main() -> Result<(), omnisocials::Error> {
 
 ## Authentication
 
-Create an API key in the OmniSocials app under **Settings -> API Keys**. Keys look like `omsk_live_...` (or `omsk_test_...`).
+Create an API key in the OmniSocials app under **Settings -> API Keys**. Keys start with `omsk_live_`. There are no test keys and no test mode: every key works on your real connected accounts. To try things safely, leave out `scheduled_at` so the post stays a draft (a draft never publishes on its own), or use a separate workspace with test accounts.
 
 The client reads `OMNISOCIALS_API_KEY` from the environment, or you can pass one explicitly:
 
@@ -109,6 +109,8 @@ client.posts().create(CreatePostParams {
 
 ### Planned drafts
 
+> **Not yet released (coming in 0.10.0).** This section describes the next SDK release. The current release is 0.9.0.
+
 Set `draft: Some(true)` with `scheduled_at` to store the post as a draft that keeps its time. It shows on the dashboard calendar at that slot with a dashed outline and the scheduler never publishes it: a person schedules it from the composer, or you do with `update` and `draft: Some(false)`. Use it when an agent proposes a slot that a human should confirm. A draft is not allowed with `publish_now` or `approval_workflow_id` (`400 validation_error`). On `update`, `draft: Some(false)` without `scheduled_at` is a `400 validation_error` when the draft has no time or its time is in the past (pass a new `scheduled_at` then), and `draft: Some(true)` on a scheduled post unschedules it while keeping the time.
 
 ```rust
@@ -129,6 +131,8 @@ client.posts().update(id, UpdatePostParams { draft: Some(false), ..Default::defa
 ```
 
 ### Comment-to-DM automations
+
+> **Not yet released (coming in 0.10.0).** This section describes the next SDK release. The current release is 0.9.0.
 
 Answer a keyword in an Instagram comment with a DM, once per person, with an optional public reply under the comment. Set `comment_dm_automation` on `create` (Instagram must be in `channels`) and the automation is bound to that post; it starts listening once the post is live. Needs the opt-in `automations:write` scope on the key. `client.automations()` manages the automations themselves (`list`, `get`, `create`, `update`, `delete`) and reads their activity (`list_events`, `automations:read`). On `update`, `comment_dm_automation: Some(json!({...}))` replaces the post's automation and `Some(json!(null))` removes it. Instagram rules: one private reply per comment, within 7 days; OmniSocials caps sends at 180 DMs an hour per account.
 
@@ -210,6 +214,38 @@ client.posts().create(CreatePostParams {
     instagram: Some(json!({ "share_to_feed": true })),
     youtube: Some(json!({ "title": "Summer shoot BTS", "privacy": "public" })),
     x: Some(json!({ "reply_settings": "following", "made_with_ai": false })),
+    ..Default::default()
+}).await?;
+```
+
+### Telegram channels and groups
+
+> **Not yet released.** Telegram comes with the next SDK release.
+
+`telegram` is a channel or group the workspace connected in OmniSocials; the OmniSocials bot posts to it. The `telegram` options: `silent`, `link_preview`, `pin`, `protect_content`, `spoiler` and `caption_above_media` (booleans), up to 3 `buttons` (`{ text, url }`, not on an album or a poll), a native `poll` (2 to 12 options of up to 100 characters, `open_period` 5 to 2628000 seconds, `multiple`; the post text is the question, max 300 characters, no media) and `first_comment` (a reply under the post). Text up to 4,096 characters; with media, text over 1,024 characters is sent as a reply under the media. Albums hold up to 10 photos and videos, files up to 50 MB, no Stories. Once sent, the post's `telegram.result` carries the message ids and the link. Telegram gives bots no view counts: analytics carry the reactions and the poll votes.
+
+```rust
+use serde_json::json;
+
+client.posts().create(CreatePostParams {
+    content: "The new collection is live. Tap the button to shop.".into(),
+    channels: Some(vec!["telegram".into()]),
+    scheduled_at: Some("2026-11-02T09:00:00Z".into()),
+    media_urls: Some(vec!["https://example.com/collection.jpg"].into()),
+    telegram: Some(json!({
+        "silent": true,
+        "pin": true,
+        "buttons": [{ "text": "Shop now", "url": "https://example.com/shop" }],
+        "first_comment": "Questions? Reply to this message."
+    })),
+    ..Default::default()
+}).await?;
+
+// A native poll: the text is the question.
+client.posts().create(CreatePostParams {
+    content: "Which day suits the live Q&A?".into(),
+    channels: Some(vec!["telegram".into()]),
+    telegram: Some(json!({ "poll": { "options": ["Tuesday", "Thursday", "Saturday"], "open_period": 86400 } })),
     ..Default::default()
 }).await?;
 ```
@@ -587,6 +623,8 @@ let account_stats = client.analytics().accounts(AccountAnalyticsParams {
 
 ### Best times to post
 
+The response is not wrapped in `data`. `platform`, `timezone`, `basis`, `grid` and `recommendations` sit at the top level.
+
 ```rust
 use omnisocials::BestTimesParams;
 
@@ -594,6 +632,9 @@ let best = client.analytics().best_times(BestTimesParams {
     platform: "instagram".into(),
     timezone: Some("Europe/Amsterdam".into()),
 }).await?;
+for slot in best["recommendations"].as_array().into_iter().flatten() {
+    println!("{} {} {}", slot["day"], slot["time"], slot["score"]);
+}
 ```
 
 ## Inbox
@@ -895,7 +936,7 @@ The `err.status()`, `err.code()`, and `err.retry_after()` accessors work across 
 
 ## API scopes
 
-Each API key carries scopes: `posts:read`, `posts:write`, `media:write`, `accounts:read`, `analytics:read`, `webhooks:manage`, plus the opt-in `automations:read` / `automations:write` for comment-to-DM automations. A call with a missing scope returns `Error::PermissionDenied` with code `insufficient_scope`.
+Each API key carries scopes: `posts:read`, `posts:write`, `media:write`, `accounts:read`, `analytics:read`, `webhooks:manage`, plus the opt-in `automations:read` / `automations:write` for comment-to-DM automations (not yet released in the SDK, coming in 0.10.0). A call with a missing scope returns `Error::PermissionDenied` with code `insufficient_scope`.
 
 ## Documentation
 

@@ -320,6 +320,18 @@ pub struct CreatePostParams {
     /// Google Business options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google_business: Option<Value>,
+    /// Telegram options (the connected channel or group, posted by the
+    /// OmniSocials bot), e.g. `json!({"silent": true, "pin": true,
+    /// "buttons": [{"text": "Shop", "url": "https://..."}]})`. Keys:
+    /// `silent`, `link_preview`, `pin`, `protect_content`, `spoiler`,
+    /// `caption_above_media`, up to 3 `buttons` (not on an album or a poll),
+    /// a native `poll` (`{"options": [...], "open_period": 3600, "multiple":
+    /// true}`: 2 to 12 options of up to 100 chars; the post text is the
+    /// question, max 300 chars, no media) and `first_comment`. Text up to
+    /// 4,096 chars; with media, text over 1,024 chars is sent as a reply
+    /// under the media. No Stories.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<Value>,
     /// Non-sponsored LinkedIn poll (e.g. `json!({"question": "...",
     /// "options": ["A", "B"], "duration": "ONE_DAY"})`). Question max 140
     /// chars; 2-4 `options`, each max 30 chars; `duration` one of
@@ -437,6 +449,11 @@ pub struct UpdatePostParams {
     /// Google Business options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google_business: Option<Value>,
+    /// Telegram options (see [`CreatePostParams::telegram`] for the keys).
+    /// Every key merges into the stored options; a key set to `null` removes
+    /// it (e.g. `json!({"poll": null})`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<Value>,
     /// Non-sponsored LinkedIn poll (see [`CreatePostParams::linkedin_poll`]
     /// for the shape). `Some(Value::Null)` (i.e. `json!(null)`) explicitly
     /// clears the poll, reverting the post to normal; omitting the field
