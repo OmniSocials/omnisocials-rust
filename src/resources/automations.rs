@@ -9,9 +9,11 @@ use crate::types::{
 
 /// `client.automations()`: comment-to-DM automations. An automation answers
 /// a keyword in an Instagram comment (or a DM, or a story reply) with a DM,
-/// once per person, with an optional public reply under the comment.
-/// Instagram rules: one private reply per comment, within 7 days;
-/// OmniSocials caps sends at 180 DMs an hour per account. The scopes are
+/// once per person, with an optional public reply under the comment. With
+/// `platform` `"facebook"` it runs on a Facebook Page instead, and the DM
+/// lands in Messenger (a Page has no story replies). Meta rules, the same on
+/// both: one private reply per comment, within 7 days; OmniSocials caps
+/// sends at 180 DMs an hour per account and platform. The scopes are
 /// opt-in on the API key: `automations:read` for `list`, `get` and
 /// `list_events`, `automations:write` for `create`, `update` and `delete`
 /// (and for [`crate::CreatePostParams::comment_dm_automation`]).
@@ -22,13 +24,17 @@ pub struct Automations<'a> {
 
 impl Automations<'_> {
     /// `GET /automations` - list the workspace's comment-to-DM automations,
-    /// optionally by `status` (`"active"`, `"paused"`, `"completed"`) or by
-    /// the OmniSocials `post_id` they are bound to. Requires the
-    /// `automations:read` scope (opt-in on the API key).
+    /// optionally by `status` (`"active"`, `"paused"`, `"completed"`), by
+    /// `platform` (`"instagram"`, `"facebook"`) or by the OmniSocials
+    /// `post_id` they are bound to. Requires the `automations:read` scope
+    /// (opt-in on the API key).
     pub async fn list(&self, params: ListAutomationsParams) -> Result<Value, Error> {
         let mut query = Vec::new();
         if let Some(status) = params.status {
             query.push(("status", status));
+        }
+        if let Some(platform) = params.platform {
+            query.push(("platform", platform));
         }
         if let Some(post_id) = params.post_id {
             query.push(("post_id", post_id));
@@ -44,18 +50,23 @@ impl Automations<'_> {
             .await
     }
 
-    /// `POST /automations` - create a comment-to-DM automation. Bind it to
-    /// one post with `post_id` (an OmniSocials post that goes to Instagram,
-    /// scheduled or live; one automation per post) or `instagram_media_id`
-    /// (a post published outside OmniSocials), not both; a `trigger` with
-    /// `"scope": "next_post"` or `"any"` needs neither. `actions` is
-    /// required (`dm.text`, max 1000 characters). Requires the
-    /// `automations:write` scope (opt-in on the API key). Errors:
-    /// `400 validation_error`, `400 post_not_instagram`,
+    /// `POST /automations` - create a comment-to-DM automation. `platform`
+    /// `"facebook"` runs it on a Facebook Page (the DM lands in Messenger).
+    /// Bind it to one post with `post_id` (an OmniSocials post that goes to
+    /// the channel, scheduled or live; one automation per post and
+    /// platform), `instagram_media_id` (an Instagram post published outside
+    /// OmniSocials) or `facebook_post_id` (a Page post published outside
+    /// OmniSocials; implies `"facebook"`), at most one; a `trigger` with
+    /// `"scope": "next_post"` or `"any"` needs none. `actions` is required
+    /// (`dm.text`, max 1000 characters). Requires the `automations:write`
+    /// scope (opt-in on the API key). Errors: `400 validation_error`,
+    /// `400 post_not_instagram`, `400 post_not_facebook`,
     /// `400 post_required`, `404 post_not_found`,
-    /// `404 instagram_media_not_found`, `409 instagram_not_connected`,
-    /// `409 instagram_needs_reauth`, `409 automation_exists` (the error body
-    /// also carries `automation_id`).
+    /// `404 instagram_media_not_found`, `404 facebook_post_not_found`,
+    /// `409 instagram_not_connected`, `409 instagram_needs_reauth`,
+    /// `409 facebook_not_connected`, `409 facebook_needs_reauth`,
+    /// `409 automation_exists` (the error body also carries
+    /// `automation_id`).
     pub async fn create(&self, params: CreateAutomationParams) -> Result<Value, Error> {
         self.client.post_json("/automations", &params).await
     }
@@ -67,10 +78,11 @@ impl Automations<'_> {
     /// `limits.stop_at` keeps `max_sends`. `public_reply.enabled: false` or
     /// `variations: []` turns the public reply off; `limits.max_sends:
     /// null` removes that limit. `status: "paused"` pauses and `"active"`
-    /// resumes; another `post_id` / `instagram_media_id` moves the
-    /// automation to that post. A `completed` automation starts again when
-    /// its limits or trigger change. Requires the `automations:write`
-    /// scope. `400 no_fields` when the body is empty.
+    /// resumes; another `post_id` / `instagram_media_id` /
+    /// `facebook_post_id` moves the automation to that post. The platform
+    /// cannot change (`400 platform_immutable`). A `completed` automation
+    /// starts again when its limits or trigger change. Requires the
+    /// `automations:write` scope. `400 no_fields` when the body is empty.
     pub async fn update(&self, id: &str, params: UpdateAutomationParams) -> Result<Value, Error> {
         self.client
             .patch_json(&format!("/automations/{}", encode_path_segment(id)), &params)
@@ -96,7 +108,8 @@ impl Automations<'_> {
     /// `counts` is the number of events per outcome (an outcome with no
     /// events is left out). Each event carries `kind` (`comment`, `dm`,
     /// `story_reply`), `outcome`, `reason` / `reason_label`, `person`
-    /// (`id`, `username`), `trigger_id`, `trigger_text`, `message` (the DM
+    /// (`id`, `username`; on Facebook the person's name, since Facebook has
+    /// no @handle), `trigger_id`, `trigger_text`, `message` (the DM
     /// sent), `public_reply`, `platform_message_id`, `created_at` and
     /// `sent_at`.
     pub async fn list_events(

@@ -246,19 +246,23 @@ pub struct CreatePostParams {
     /// `image_fit`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_fit: Option<HashMap<String, String>>,
-    /// Comment-to-DM automation bound to this post (Instagram must be in
-    /// `channels`): a keyword in a comment is answered with a DM, once per
-    /// person, with an optional public reply under the comment. E.g.
-    /// `json!({"trigger": {"keywords": ["guide"], "match": "word"},
+    /// Comment-to-DM automation bound to this post (Instagram or Facebook
+    /// must be in `channels`): a keyword in a comment is answered with a DM,
+    /// once per person, with an optional public reply under the comment.
+    /// E.g. `json!({"trigger": {"keywords": ["guide"], "match": "word"},
     /// "actions": {"dm": {"text": "..."}, "public_reply": {"enabled": true,
-    /// "variations": ["..."]}}, "limits": {"max_sends": 500}})` (see
-    /// [`CreateAutomationParams`] for the fields). Needs the
-    /// `automations:write` scope on the key (`403 insufficient_scope`,
-    /// checked before anything else); a bad object is a
-    /// `400 validation_error` whose message starts with
+    /// "variations": ["..."]}}, "limits": {"max_sends": 500}, "platforms":
+    /// ["instagram", "facebook"]})` (see [`CreateAutomationParams`] for the
+    /// fields). `platforms` makes one automation per listed channel; each
+    /// must be a channel of the post. Without it: Instagram when the post
+    /// goes there, else Facebook. Needs the `automations:write` scope on the
+    /// key (`403 insufficient_scope`, checked before anything else); a bad
+    /// object is a `400 validation_error` whose message starts with
     /// `comment_dm_automation: `. The response then carries
-    /// `data.comment_dm_automation` (the automation, with `post` null); it
-    /// starts listening once the post is live on Instagram.
+    /// `data.comment_dm_automation` (the first automation, with `post`
+    /// null, plus `platforms` and `automations`, one `id` / `platform` /
+    /// `status` per channel); each starts listening once the post is live
+    /// on its channel.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment_dm_automation: Option<Value>,
     /// Pinterest options (e.g. `json!({"board_id": "...", "title": "..."})`).
@@ -332,6 +336,21 @@ pub struct CreatePostParams {
     /// under the media. No Stories.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telegram: Option<Value>,
+    /// Discord options (one Discord channel, posted through its incoming
+    /// webhook with the webhook's name and picture), e.g.
+    /// `json!({"silent": true, "buttons": [{"text": "Notes", "url":
+    /// "https://..."}]})`. Keys: `silent`, `link_preview` (default on),
+    /// `allow_mentions` (default off: mentions show as text and ping nobody),
+    /// `spoiler`, `thread_name` (the post title in a forum or media channel,
+    /// 1 to 100 chars), up to 5 `buttons` (1 to 80 chars, https:// or
+    /// http://, one row, not with a poll) and a native `poll`
+    /// (`{"options": [...], "duration_hours": 24, "multiple": true}`: 2 to 10
+    /// options of up to 55 chars, 1 to 768 hours; the post text is the
+    /// question, max 300 chars, no media and no buttons). Text up to 2,000
+    /// chars; up to 10 images, GIFs and videos per message, a video or GIF
+    /// over 20 MB is sent as a link in the text. No Stories.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discord: Option<Value>,
     /// Non-sponsored LinkedIn poll (e.g. `json!({"question": "...",
     /// "options": ["A", "B"], "duration": "ONE_DAY"})`). Question max 140
     /// chars; 2-4 `options`, each max 30 chars; `duration` one of
@@ -382,9 +401,10 @@ pub struct UpdatePostParams {
     /// `warnings` with code `image_fit`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_fit: Option<HashMap<String, String>>,
-    /// Replaces the post's comment-to-DM automation (same shape as
-    /// [`CreatePostParams::comment_dm_automation`]). `json!(null)` removes
-    /// it; omit to leave it untouched. Needs the `automations:write` scope.
+    /// Replaces the post's comment-to-DM automations (same shape as
+    /// [`CreatePostParams::comment_dm_automation`]; a channel no longer in
+    /// `platforms` loses its automation). `json!(null)` removes them all;
+    /// omit to leave them untouched. Needs the `automations:write` scope.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment_dm_automation: Option<Value>,
     /// New platform identifiers list.
@@ -454,6 +474,12 @@ pub struct UpdatePostParams {
     /// it (e.g. `json!({"poll": null})`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telegram: Option<Value>,
+    /// Discord options (see [`CreatePostParams::discord`] for the keys).
+    /// Every key merges into the stored options; a key set to `null` removes
+    /// it (e.g. `json!({"poll": null})`), and `Some(json!(null))` removes
+    /// every Discord option. Omit to leave them untouched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discord: Option<Value>,
     /// Non-sponsored LinkedIn poll (see [`CreatePostParams::linkedin_poll`]
     /// for the shape). `Some(Value::Null)` (i.e. `json!(null)`) explicitly
     /// clears the poll, reverting the post to normal; omitting the field
@@ -769,7 +795,9 @@ pub struct ListPinterestProductsParams {
 pub struct ListAutomationsParams {
     /// `"active"`, `"paused"` or `"completed"`.
     pub status: Option<String>,
-    /// Only the automation bound to this OmniSocials post.
+    /// `"instagram"` or `"facebook"`: only that channel's automations.
+    pub platform: Option<String>,
+    /// Only the automations bound to this OmniSocials post.
     pub post_id: Option<String>,
 }
 
@@ -790,23 +818,37 @@ pub struct ListAutomationEventsParams {
 /// (see [`crate::resources::Automations::create`]).
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CreateAutomationParams {
+    /// `"instagram"` (default) or `"facebook"` (a Facebook Page; the DM
+    /// lands in Messenger). `facebook_post_id` implies `"facebook"`.
+    /// Facebook has no story replies: `story_reply` in `trigger.kinds` is a
+    /// `400 validation_error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
     /// Name, max 120 characters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// For scope `post`: an OmniSocials post that goes to Instagram
-    /// (scheduled or live). One automation per post. Set `post_id` OR
-    /// `instagram_media_id`, not both.
+    /// For scope `post`: an OmniSocials post that goes to the automation's
+    /// channel (scheduled or live). One automation per post and platform: a
+    /// post that goes to Instagram and Facebook can have one of each. Set at
+    /// most one of `post_id`, `instagram_media_id` and `facebook_post_id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_id: Option<String>,
-    /// For scope `post`: a post published outside OmniSocials (numeric
-    /// Instagram media id).
+    /// For scope `post`: an Instagram post published outside OmniSocials
+    /// (numeric Instagram media id).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instagram_media_id: Option<String>,
+    /// For scope `post`: a post published on the Facebook Page outside
+    /// OmniSocials, as `{page-id}_{post-id}` or the post id alone (the Page
+    /// id is put in front). Implies `platform` `"facebook"`. A post of
+    /// another Page is a `404 facebook_post_not_found`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub facebook_post_id: Option<String>,
     /// `json!({"kinds": ["comment"], "scope": "post", "keywords": ["guide"],
     /// "match": "word"})`: `kinds` one or more of `comment`, `dm`,
-    /// `story_reply` (default `["comment"]`); `scope` `post` (default),
-    /// `next_post` (the next Instagram post the workspace publishes) or
-    /// `any` (every post); `keywords` up to 20 of 60 characters, required
+    /// `story_reply` (default `["comment"]`; a Facebook Page has `comment`
+    /// and `dm` only); `scope` `post` (default), `next_post` (the next post
+    /// the workspace publishes on the automation's channel) or `any` (every
+    /// post); `keywords` up to 20 of 60 characters, required
     /// unless `match` is `any`; `match` `word` (default), `contains` or
     /// `any`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -829,15 +871,23 @@ pub struct CreateAutomationParams {
 /// optional; a body with nothing is a `400 no_fields`.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct UpdateAutomationParams {
+    /// The platform cannot change: another platform (or
+    /// `instagram_media_id` on a Facebook automation, `facebook_post_id` on
+    /// an Instagram one) is a `400 platform_immutable`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
     /// New name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Moves the automation to that OmniSocials post.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_id: Option<String>,
-    /// Moves the automation to that Instagram post.
+    /// Moves an Instagram automation to that Instagram post.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instagram_media_id: Option<String>,
+    /// Moves a Facebook automation to that Facebook Page post.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub facebook_post_id: Option<String>,
     /// Merged into the stored trigger (see
     /// [`CreateAutomationParams::trigger`]): keys you omit keep their value,
     /// so new `keywords` keep the kinds, the scope and the match.

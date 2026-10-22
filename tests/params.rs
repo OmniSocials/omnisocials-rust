@@ -228,6 +228,30 @@ fn update_post_params_linkedin_poll_null_clears() {
 }
 
 #[test]
+fn update_post_params_discord_merge_and_null() {
+    // A key set to null removes that Discord option; the rest merges.
+    let merge = serde_json::to_value(UpdatePostParams {
+        discord: Some(json!({"poll": null, "silent": true})),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(merge["discord"]["poll"].is_null());
+    assert_eq!(merge["discord"]["silent"], true);
+
+    // Some(Value::Null) => "discord": null, which removes every option.
+    let removed = serde_json::to_value(UpdatePostParams {
+        discord: Some(Value::Null),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(removed, json!({"discord": null}));
+
+    // None => omitted (stored options untouched).
+    let untouched = serde_json::to_value(UpdatePostParams::default()).unwrap();
+    assert!(untouched.get("discord").is_none());
+}
+
+#[test]
 fn update_media_params_double_option_folder_id() {
     // None => omitted entirely.
     let untouched = serde_json::to_value(UpdateMediaParams::default()).unwrap();
@@ -318,6 +342,23 @@ fn automation_params_serialize() {
     })
     .unwrap();
     assert_eq!(paused, json!({"status": "paused"}));
+
+    // Facebook: platform and facebook_post_id go in the body.
+    let facebook = serde_json::to_value(CreateAutomationParams {
+        platform: Some("facebook".into()),
+        facebook_post_id: Some("111_222".into()),
+        actions: json!({"dm": {"text": "Here is the guide"}}),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        facebook,
+        json!({
+            "platform": "facebook",
+            "facebook_post_id": "111_222",
+            "actions": {"dm": {"text": "Here is the guide"}}
+        })
+    );
 }
 
 #[test]
