@@ -121,8 +121,8 @@ impl Inbox<'_> {
     /// balance can't cover it, this fails with [`Error::Api`] (status 402)
     /// and code `insufficient_credits`. If the workspace's X inbox was
     /// auto-suspended for hitting a zero balance, it fails with code
-    /// `x_inbox_suspended` instead; top up and re-enable the inbox to
-    /// resume (DMs that arrived while suspended are not recovered).
+    /// `x_inbox_suspended` instead; a top-up turns the inbox back on by
+    /// itself (DMs that arrived while suspended are not recovered).
     ///
     /// On comment and mention threads, set `message_id` (the `id` of the
     /// comment being answered: `message.id` from [`next`](Self::next), or a

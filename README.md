@@ -164,9 +164,11 @@ for event in events["data"].as_array().unwrap() {
 }
 ```
 
-The events response is `data`, `counts` and `pagination`, not the plain list: `counts` is the number of events per outcome (`sent`, `skipped`, `failed`, `pending`). An automation can also listen on a post published outside OmniSocials (`client.automations().create(CreateAutomationParams { instagram_media_id: Some(...), actions: json!({...}), ..Default::default() })`), on the next post the workspace publishes (`trigger: Some(json!({"scope": "next_post"}))`) or on every post (`"scope": "any"`), and on DMs and story replies (`"kinds": ["dm", "story_reply"]`).
+The events response is `data`, `counts` and `pagination`, not the plain list: `counts` is the number of events per outcome (`sent`, `skipped`, `failed`, `pending`, `queued`, `opted_out`). An automation can also listen on a post published outside OmniSocials (`client.automations().create(CreateAutomationParams { instagram_media_id: Some(...), actions: json!({...}), ..Default::default() })`), on the next post the workspace publishes (`trigger: Some(json!({"scope": "next_post"}))`) or on every post (`"scope": "any"`), and on DMs and story replies (`"kinds": ["dm", "story_reply"]`).
 
 A Facebook Page works the same way, and the DM lands in Messenger: set `platform: Some("facebook".into())` on `CreateAutomationParams`, or `facebook_post_id` for a Page post published outside OmniSocials. On a post, `comment_dm_automation: Some(json!({"platforms": ["instagram", "facebook"], ...}))` makes one automation per channel with the same keywords and DM. Facebook has no story replies.
+
+On X, set `platform: Some("x".into())` and `trigger: Some(json!({"kinds": ["dm"], "keywords": ["guide"]}))` on `CreateAutomationParams`: the X account answers a keyword in a DM, once per person, and every answer ends with "Reply STOP to stop automatic messages." An active X automation needs X DMs on for the workspace (`409 x_dms_off`; `status: Some("paused".into())` always saves). An answer over the send cap waits in a queue (`queued`) for up to an hour.
 
 ### Publish immediately
 
@@ -738,7 +740,7 @@ while !next["data"].is_null() {
 
 ### X DM replies use credits
 
-Replying to an X DM costs 2 prepaid credits per send, debited before the send and automatically refunded if the send fails. If the balance can't cover it, `reply` fails with `Error::Api` (status 402) and code `insufficient_credits`. If the workspace's X inbox was auto-suspended for hitting a zero balance, it fails with code `x_inbox_suspended` instead; top up and re-enable the inbox in the dashboard to resume (DMs that arrived while suspended are not recovered).
+Replying to an X DM costs 2 prepaid credits per send, debited before the send and automatically refunded if the send fails. If the balance can't cover it, `reply` fails with `Error::Api` (status 402) and code `insufficient_credits`. If the workspace's X inbox was auto-suspended for hitting a zero balance, it fails with code `x_inbox_suspended` instead; a top-up turns the inbox back on by itself (DMs that arrived while suspended are not recovered).
 
 ```rust
 use omnisocials::Error;
@@ -752,7 +754,7 @@ match client.inbox().reply(conversation_id, ReplyParams {
         eprintln!("not enough credits, top up in the dashboard");
     }
     Err(err) if err.code() == Some("x_inbox_suspended") => {
-        eprintln!("X inbox suspended, top up and re-enable it");
+        eprintln!("X inbox suspended until a top-up");
     }
     Err(err) => eprintln!("reply failed: {err}"),
 }

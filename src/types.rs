@@ -795,7 +795,8 @@ pub struct ListPinterestProductsParams {
 pub struct ListAutomationsParams {
     /// `"active"`, `"paused"` or `"completed"`.
     pub status: Option<String>,
-    /// `"instagram"` or `"facebook"`: only that channel's automations.
+    /// `"instagram"`, `"facebook"` or `"x"`: only that channel's
+    /// automations.
     pub platform: Option<String>,
     /// Only the automations bound to this OmniSocials post.
     pub post_id: Option<String>,
@@ -806,7 +807,9 @@ pub struct ListAutomationsParams {
 /// optional.
 #[derive(Debug, Clone, Default)]
 pub struct ListAutomationEventsParams {
-    /// `"sent"`, `"skipped"`, `"failed"` or `"pending"`.
+    /// `"sent"`, `"skipped"`, `"failed"`, `"pending"`, `"queued"` (the
+    /// answer waits for a free slot under the send cap and goes out within
+    /// the hour) or `"opted_out"` (the person replied STOP on X).
     pub outcome: Option<String>,
     /// Events per page, 1 to 100 (default 25).
     pub limit: Option<u32>,
@@ -818,10 +821,13 @@ pub struct ListAutomationEventsParams {
 /// (see [`crate::resources::Automations::create`]).
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CreateAutomationParams {
-    /// `"instagram"` (default) or `"facebook"` (a Facebook Page; the DM
-    /// lands in Messenger). `facebook_post_id` implies `"facebook"`.
-    /// Facebook has no story replies: `story_reply` in `trigger.kinds` is a
-    /// `400 validation_error`.
+    /// `"instagram"` (default), `"facebook"` (a Facebook Page; the DM lands
+    /// in Messenger) or `"x"` (the X account: `trigger.kinds` `["dm"]` only,
+    /// no post fields). `facebook_post_id` implies `"facebook"`. Facebook
+    /// has no story replies: `story_reply` in `trigger.kinds` is a
+    /// `400 validation_error`. An active X automation needs X DMs on for the
+    /// workspace (`409 x_dms_off`; `status` `"paused"` always saves), and
+    /// every X answer ends with "Reply STOP to stop automatic messages.".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
     /// Name, max 120 characters.
@@ -846,7 +852,7 @@ pub struct CreateAutomationParams {
     /// `json!({"kinds": ["comment"], "scope": "post", "keywords": ["guide"],
     /// "match": "word"})`: `kinds` one or more of `comment`, `dm`,
     /// `story_reply` (default `["comment"]`; a Facebook Page has `comment`
-    /// and `dm` only); `scope` `post` (default), `next_post` (the next post
+    /// and `dm` only, X has `dm` only); `scope` `post` (default), `next_post` (the next post
     /// the workspace publishes on the automation's channel) or `any` (every
     /// post); `keywords` up to 20 of 60 characters, required
     /// unless `match` is `any`; `match` `word` (default), `contains` or
@@ -904,7 +910,8 @@ pub struct UpdateAutomationParams {
     /// keeps `max_sends`; `json!({"max_sends": null})` removes that limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limits: Option<Value>,
-    /// `"paused"` pauses, `"active"` resumes.
+    /// `"paused"` pauses, `"active"` resumes (an X automation only while X
+    /// DMs are on for the workspace, else `409 x_dms_off`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
 }
