@@ -318,7 +318,10 @@ pub struct CreatePostParams {
     /// country?}` to store display fields along with the id (`location_id`
     /// wins when both are given). Threads location tagging is currently
     /// rolling out; until Meta approves the permissions it is disabled on
-    /// production and calls return a clear error.
+    /// production and calls return a clear error. `topic_tag` sets the topic
+    /// of the post, for example `"Build in public"` (1 to 50 characters, no
+    /// period and no ampersand; on a multi-part thread it goes on part 1;
+    /// `null` on update removes it).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threads: Option<Value>,
     /// Google Business options.
@@ -461,9 +464,10 @@ pub struct UpdatePostParams {
     /// `json!({"thread_parts": null})` clears thread mode; omit to leave it untouched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mastodon: Option<Value>,
-    /// `json!({"thread_parts": null})` clears thread mode and
+    /// `json!({"thread_parts": null})` clears thread mode,
     /// `json!({"location_id": null})` (or `json!({"location": null})`) clears
-    /// the Threads location tag; omit a field to leave it untouched.
+    /// the Threads location tag and `json!({"topic_tag": null})` removes the
+    /// topic; omit a field to leave it untouched.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threads: Option<Value>,
     /// Google Business options.
