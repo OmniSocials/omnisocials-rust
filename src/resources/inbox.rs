@@ -202,6 +202,34 @@ impl Inbox<'_> {
             .await
     }
 
+    /// `POST /inbox/messages/:id/like` - like (`true`) or unlike (`false`) a
+    /// comment someone left on one of your posts, as the connected Page or
+    /// account (scope `inbox:write`). Facebook Page, LinkedIn Page and TikTok
+    /// comments (incoming comments only). Facebook allows only Like (no Love
+    /// or other reactions). Liking a comment that is already liked, or
+    /// unliking one that is not, succeeds. The response returns the comment
+    /// after the change under `data`, with `liked` set: `true` when the
+    /// account liked it, `false` when not, `null` where the platform has no
+    /// like through OmniSocials (DMs, Instagram, YouTube, X, Threads). On
+    /// Facebook and LinkedIn `liked` reflects likes made through OmniSocials;
+    /// TikTok also syncs likes made in the TikTok app.
+    ///
+    /// Errors: 400 `unsupported_platform` (not an incoming Facebook, LinkedIn
+    /// or TikTok comment), 401 `reauth_required` (the TikTok comments
+    /// authorization is missing or expired, or the LinkedIn Page connection expired), 403 `reconnect_required` (the
+    /// account was connected without the permission to like comments;
+    /// reconnect it in the dashboard), 404 `not_found` (message not in this
+    /// workspace) or `account_not_connected`, 502 `platform_error` (the
+    /// platform rejected the call).
+    pub async fn like(&self, message_id: &str, like: bool) -> Result<Value, Error> {
+        self.client
+            .post_json(
+                &format!("/inbox/messages/{}/like", encode_path_segment(message_id)),
+                &serde_json::json!({ "like": like }),
+            )
+            .await
+    }
+
     /// `DELETE /inbox/messages/:id` - delete a comment someone left on one of
     /// your posts, on the platform and from the inbox (scope `inbox:write`).
     /// Facebook, Instagram and TikTok comments only: YouTube's API does not
@@ -258,7 +286,7 @@ impl Inbox<'_> {
     /// `{ "conversation", "message", "messages", "reply_window" }`, or `null`
     /// when nothing is waiting. `message` is the unanswered incoming item
     /// itself (the customer's latest DM, or the specific comment): its `id`
-    /// is what [`hide`](Self::hide) and
+    /// is what [`hide`](Self::hide), [`like`](Self::like) and
     /// [`delete_message`](Self::delete_message) take and the `message_id` to
     /// set on [`reply`](Self::reply) for comment threads, its
     /// `conversation_id` is what [`reply`](Self::reply) takes. `messages` is

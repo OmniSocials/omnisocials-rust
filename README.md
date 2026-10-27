@@ -696,6 +696,12 @@ let message_id = messages["data"][0]["id"].as_str().unwrap();
 client.inbox().hide(message_id, true).await?;  // hide
 client.inbox().hide(message_id, false).await?; // unhide
 
+// Like (or unlike) a comment as the connected Page or account: Facebook,
+// LinkedIn Page and TikTok comments. The comment comes back with `liked` set.
+let liked = client.inbox().like(message_id, true).await?; // like
+client.inbox().like(message_id, false).await?;            // unlike
+println!("{}", liked["data"]["liked"]); // true
+
 // Delete a comment outright (Facebook, Instagram, TikTok; YouTube: hide
 // instead). Replies under it go with it; their ids come back as
 // `removed_reply_ids`.
