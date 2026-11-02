@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::tag_params::TagRef;
+
 // ─── Shared shapes ───────────────────────────────────────────────────────────
 
 /// Post caption: either a single string used everywhere, or a per-platform
@@ -216,6 +218,12 @@ pub struct CreatePostParams {
     /// Restrict the hashtags to a subset of `channels`. Omit for all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hashtag_platforms: Option<Vec<String>>,
+    /// The post's tags: tag ids or names (`vec!["Question".into(),
+    /// 14.into()]`). A name matches case-insensitively; a name that does not
+    /// exist yet becomes a tag of the workspace. At most 20. Tags never go
+    /// to a platform.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<TagRef>>,
     /// Route the post through a saved approval workflow (id from
     /// `client.approval_workflows().list()`). The post is created as
     /// `in_approval` (`approval_status: "pending"`) instead of `scheduled`;
@@ -410,6 +418,12 @@ pub struct UpdatePostParams {
     /// omit to leave them untouched. Needs the `automations:write` scope.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment_dm_automation: Option<Value>,
+    /// Replaces the post's tags (ids or names, a new name becomes a tag).
+    /// `Some(None)` sends JSON `null` and `Some(Some(vec![]))` sends `[]`:
+    /// both remove every tag. `None` leaves them untouched. An update that
+    /// sets only `tags` works on every post, published ones included.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Option<Vec<TagRef>>>,
     /// New platform identifiers list.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channels: Option<Vec<String>>,
@@ -508,6 +522,10 @@ pub struct ListPostsParams {
     pub limit: Option<u32>,
     /// Items to skip (default 0).
     pub offset: Option<u32>,
+    /// Only posts with this tag: a tag id or name. Comma separate several
+    /// to match posts with any of them. An unknown tag answers 404
+    /// `tag_not_found`.
+    pub tag: Option<String>,
 }
 
 /// Query for `GET /posts/recent-platform`.
@@ -729,6 +747,10 @@ pub struct AnalyticsOverviewParams {
     pub start_date: Option<String>,
     /// ISO date (YYYY-MM-DD); use with `start_date` instead of `period`.
     pub end_date: Option<String>,
+    /// Only the post numbers of the posts with this tag: a tag id or name,
+    /// comma separated for any of several. Account numbers stay those of
+    /// the whole account.
+    pub tag: Option<String>,
 }
 
 /// Query for `GET /analytics/accounts`.

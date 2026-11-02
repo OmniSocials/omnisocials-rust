@@ -42,11 +42,13 @@
 mod client;
 mod error;
 pub mod resources;
+mod tag_params;
 mod types;
 pub mod webhooks;
 
 pub use client::{Client, ClientBuilder, VERSION};
 pub use error::Error;
+pub use tag_params::{ApplyTagsParams, CreateTagParams, TagAnalyticsParams, TagRef, UpdateTagParams};
 pub use types::{
     AccountAnalyticsParams, AnalyticsOverviewParams, BestTimesParams, CheckMediaParams, Content,
     CreateAutomationParams, CreateFolderParams, CreateHashtagSetParams, CreatePostParams,

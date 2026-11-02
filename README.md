@@ -608,6 +608,72 @@ client.posts().create(CreatePostParams {
 }).await?;
 ```
 
+## Post tags
+
+Tags are your own labels for posts, such as a hook style or a format, to filter and compare posts in Analytics. They never go to a platform. Uses the `posts:read` / `posts:write` scopes (`analytics().tags()` needs `analytics:read`).
+
+```rust
+use omnisocials::{
+    AnalyticsOverviewParams, ApplyTagsParams, CreateTagParams, ListPostsParams, TagAnalyticsParams,
+    UpdatePostParams, UpdateTagParams,
+};
+
+let tag = client.tags().create(CreateTagParams {
+    name: "Question hook".into(),
+    color: Some("blue".into()), // optional
+}).await?;
+let id = tag["data"]["id"].as_i64().unwrap();
+
+client.tags().list().await?;
+client.tags().update(id, UpdateTagParams { name: Some("Question".into()), ..Default::default() }).await?;
+let deleted = client.tags().delete(id).await?; // takes it off every post; posts stay
+println!("{}", deleted["data"]["posts_untagged"]);
+
+// Tag a post at create time: tag ids or names; a new name becomes a tag (at most 20 per post)
+client.posts().create(CreatePostParams {
+    content: "Would you post this?".into(),
+    channels: Some(vec!["tiktok".into()]),
+    tags: Some(vec!["Question".into(), 14.into()]),
+    ..Default::default()
+}).await?;
+
+// Replace a post's tags; Some(None) sends null and removes them all. Works on published posts too.
+client.posts().update("post_id", UpdatePostParams {
+    tags: Some(Some(vec!["Question".into()])),
+    ..Default::default()
+}).await?;
+
+// Up to 500 posts at once: add, remove, or set (replaces; Some(vec![]) removes every tag)
+let result = client.tags().apply(ApplyTagsParams {
+    post_ids: vec!["1024".into(), "1025".into()],
+    add: Some(vec!["Question".into()]),
+    ..Default::default()
+}).await?;
+println!("{} updated, not found: {}", result["data"]["updated"], result["data"]["not_found"]);
+
+// Filter: a tag id or name, comma separated for any of several
+client.posts().list(ListPostsParams { tag: Some("Question".into()), ..Default::default() }).await?;
+client.analytics().overview(AnalyticsOverviewParams {
+    period: Some("30d".into()),
+    tag: Some("Question".into()),
+    ..Default::default()
+}).await?;
+
+// Compare tags against your normal (default: the last 90 days)
+let compared = client.analytics().tags(TagAnalyticsParams {
+    start_date: Some("2026-08-01".into()),
+    platform: Some("tiktok".into()),
+    ..Default::default()
+}).await?;
+for row in compared["data"]["tags"].as_array().unwrap() {
+    println!("{}: {} vs normal (enough posts: {})", row["tag"]["name"], row["vs_normal"], row["enough_posts"]);
+}
+```
+
+`vs_normal` is a fraction (0.38 = 38% above your normal): each post is measured against the median impressions of its own channel in the period. Read it as a hint only when `enough_posts` is false. Every post carries `tags` and `trial_reel` (`{ "strategy": "MANUAL" | "SS_PERFORMANCE" }` on an Instagram Trial Reel, else `null`), and so does every `analytics().posts()` entry.
+
+Errors: `404 tag_not_found`; `409 tag_exists` (the existing tag is in the error body under `error.tag`), `tag_limit_reached` (200 tags per workspace); `400 invalid_tag_name` (1 to 40 characters), `invalid_tag_color`, `invalid_tags`, `invalid_post_ids`, `too_many_posts`, `too_many_tags`.
+
 ## Accounts
 
 ```rust

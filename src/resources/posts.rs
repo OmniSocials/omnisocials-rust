@@ -23,6 +23,9 @@ impl Posts<'_> {
         if let Some(offset) = params.offset {
             query.push(("offset", offset.to_string()));
         }
+        if let Some(tag) = params.tag {
+            query.push(("tag", tag));
+        }
         self.client.get("/posts", query).await
     }
 

@@ -13,6 +13,7 @@ mod locations;
 mod media;
 mod pinterest;
 mod posts;
+mod tags;
 mod webhooks;
 
 pub use accounts::Accounts;
@@ -27,4 +28,5 @@ pub use locations::Locations;
 pub use media::Media;
 pub use pinterest::Pinterest;
 pub use posts::Posts;
+pub use tags::Tags;
 pub use webhooks::Webhooks;

@@ -13,6 +13,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::Error;
+use crate::resources::Tags;
 use crate::resources::{
     Accounts, Analytics, ApprovalWorkflows, Audio, Automations, Folders, HashtagSets, Inbox,
     Locations, Media, Pinterest, Posts, Webhooks,
@@ -198,6 +199,12 @@ impl Client {
     /// Saved hashtag sets: list, get, create, update, delete.
     pub fn hashtag_sets(&self) -> HashtagSets<'_> {
         HashtagSets { client: self }
+    }
+
+    /// Post tags: list, create, update, delete, apply. Compare them with
+    /// `client.analytics().tags(...)`.
+    pub fn tags(&self) -> Tags<'_> {
+        Tags { client: self }
     }
 
     /// Approval workflows (configured in the dashboard): list.
