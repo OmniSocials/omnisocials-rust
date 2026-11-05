@@ -41,6 +41,7 @@
 
 mod client;
 mod error;
+mod feature_request_params;
 pub mod resources;
 mod tag_params;
 mod types;
@@ -48,16 +49,21 @@ pub mod webhooks;
 
 pub use client::{Client, ClientBuilder, VERSION};
 pub use error::Error;
+pub use feature_request_params::{CreateFeatureRequestParams, ListLimitsParams};
 pub use tag_params::{ApplyTagsParams, CreateTagParams, TagAnalyticsParams, TagRef, UpdateTagParams};
 pub use types::{
-    AccountAnalyticsParams, AnalyticsOverviewParams, BestTimesParams, CheckMediaParams, Content,
+    AccountAnalyticsParams, AdBudget, AdDraftAd, AdDraftParams, AdDraftPlatform, AdDraftSchedule,
+    AdDraftTargeting, AdMediaFile, AdPlacementMedia, AdSchedule, AnalyticsOverviewParams,
+    AttachAdDraftAccountParams, BestTimesParams, BoostPostMultiParams, BoostPostParams,
+    CheckMediaParams, Content, CreateAdCampaignParams,
     CreateAutomationParams, CreateFolderParams, CreateHashtagSetParams, CreatePostParams,
-    CreateWebhookParams, GetMessagesParams, Hashtags, ListAutomationEventsParams,
+    CreateWebhookParams, GetMessagesParams, Hashtags, KeywordMetricsParams, KeywordResearchParams,
+    LaunchAdDraftParams, ListAdCampaignsParams, ListAutomationEventsParams,
     ListAutomationsParams, ListConversationsParams, ListMediaParams,
     ListPinterestProductsParams, ListPostsParams,
     MediaEntry, MediaRefs, NextUnansweredParams, RecentPlatformPostsParams, ReplyParams,
-    SearchLocationsParams, UpdateAutomationParams, UpdateFolderParams, UpdateHashtagSetParams,
-    UpdateMediaParams, UpdatePostParams,
+    SearchLocationsParams, UpdateAdCampaignParams, UpdateAutomationParams, UpdateFolderParams,
+    UpdateHashtagSetParams, UpdateMediaParams, UpdatePostParams,
     UpdateWebhookParams, UploadMediaFromBase64Params, UploadMediaFromUrlParams, UploadMediaParams,
     UserTag,
 };

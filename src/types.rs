@@ -261,7 +261,9 @@ pub struct CreatePostParams {
     /// "actions": {"dm": {"text": "..."}, "public_reply": {"enabled": true,
     /// "variations": ["..."]}}, "limits": {"max_sends": 500}, "platforms":
     /// ["instagram", "facebook"]})` (see [`CreateAutomationParams`] for the
-    /// fields). `platforms` makes one automation per listed channel; each
+    /// fields, also `actions.follow_gate`, Follow first, which applies to the
+    /// Instagram automation only). `platforms` makes one automation per
+    /// listed channel; each
     /// must be a channel of the post. Without it: Instagram when the post
     /// goes there, else Facebook. Needs the `automations:write` scope on the
     /// key (`403 insufficient_scope`, checked before anything else); a bad
@@ -522,6 +524,14 @@ pub struct ListPostsParams {
     pub limit: Option<u32>,
     /// Items to skip (default 0).
     pub offset: Option<u32>,
+    /// Only posts whose `schedule_at` is on or after this moment (for a post
+    /// sent at once: when it was sent). `"YYYY-MM-DD"` (a UTC day),
+    /// `"YYYY-MM"` (a month) or an ISO 8601 datetime. With a range the posts
+    /// come in calendar order (earliest first).
+    pub start_date: Option<String>,
+    /// Only posts whose `schedule_at` is on or before this moment
+    /// (inclusive). Same formats as `start_date`.
+    pub end_date: Option<String>,
     /// Only posts with this tag: a tag id or name. Comma separate several
     /// to match posts with any of them. An unknown tag answers 404
     /// `tag_not_found`.
@@ -835,7 +845,9 @@ pub struct ListAutomationsParams {
 pub struct ListAutomationEventsParams {
     /// `"sent"`, `"skipped"`, `"failed"`, `"pending"`, `"queued"` (the
     /// answer waits for a free slot under the send cap and goes out within
-    /// the hour) or `"opted_out"` (the person replied STOP on X).
+    /// the hour), `"opted_out"` (the person replied STOP on X) or
+    /// `"waiting"` (Follow first: asked to follow, the link goes out after
+    /// the follow).
     pub outcome: Option<String>,
     /// Events per page, 1 to 100 (default 25).
     pub limit: Option<u32>,
@@ -887,7 +899,20 @@ pub struct CreateAutomationParams {
     pub trigger: Option<Value>,
     /// Required: `json!({"dm": {"text": "..."}})` (max 1000 characters) plus
     /// an optional `"public_reply": {"enabled": true, "variations": [...]}`
-    /// (comment kind only, up to 10 variations of 300 characters).
+    /// (comment kind only, up to 10 variations of 300 characters) and an
+    /// optional `"follow_gate": {"enabled": true, "first_message": {"text":
+    /// "...", "button": "..."}, "not_following": {"text": "...", "button":
+    /// "..."}}`: Follow first, Instagram only. The link (the `dm` text) then
+    /// goes out only to people who follow the account: a comment gets the
+    /// first message as the private reply, with one button, and a tap checks
+    /// the follow; anyone who does not follow yet gets the `not_following`
+    /// message with its button, and every later tap checks again. A DM or a
+    /// story reply is checked at once. When Instagram gives no answer the
+    /// link goes out anyway. Texts hold 640 characters, buttons 20; a text
+    /// or button left out is the default. `"enabled": true` on a Facebook or
+    /// X automation is a `400 follow_gate_instagram_only`. The response
+    /// carries the gate with its texts (null on Facebook and X) and
+    /// `stats.followed`.
     pub actions: Value,
     /// `json!({"max_sends": 500, "stop_at": "2026-12-31T00:00:00Z"})`, both
     /// optional.
@@ -928,7 +953,9 @@ pub struct UpdateAutomationParams {
     /// Merged into the stored actions (see
     /// [`CreateAutomationParams::actions`]): a new `dm.text` keeps the
     /// public reply; `"public_reply": {"enabled": false}` or
-    /// `{"variations": []}` turns it off.
+    /// `{"variations": []}` turns it off. `follow_gate` merges too:
+    /// `{"enabled": false}` keeps its texts, new texts keep the switch,
+    /// `null` turns it off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actions: Option<Value>,
     /// Merged into the stored limits (see
@@ -940,6 +967,398 @@ pub struct UpdateAutomationParams {
     /// DMs are on for the workspace, else `409 x_dms_off`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+}
+
+// ─── Ads ─────────────────────────────────────────────────────────────────────
+//
+// Ads spend real money once a campaign starts. Boosts, campaigns and drafts
+// are created as drafts (no spend); `activate`, `activate_multi`,
+// `drafts().launch` and a budget raise through `update` start or raise spend,
+// and each needs the amount again as a confirmation. Budgets are in MAJOR
+// currency units (10 = 10 EUR) in the ad account's currency. Ids are strings,
+// like every other id in this crate; the API reads `"42"` and `42` the same.
+
+/// Query for `GET /ads/campaigns`
+/// (see [`crate::resources::Ads::list`]). Every field is optional.
+#[derive(Debug, Clone, Default)]
+pub struct ListAdCampaignsParams {
+    /// `"draft"`, `"pending_review"`, `"active"`, `"rejected"`, `"paused"`,
+    /// `"completed"` or `"error"`.
+    pub status: Option<String>,
+    /// `"meta"`, `"pinterest"`, `"tiktok"`, `"linkedin"`, `"x"` or
+    /// `"google"`.
+    pub platform: Option<String>,
+    /// `"campaign"` or `"boost"`.
+    pub campaign_type: Option<String>,
+    /// Campaigns per page, 1 to 100 (default 25).
+    pub limit: Option<u32>,
+    /// Campaigns to skip.
+    pub offset: Option<u32>,
+}
+
+/// A campaign budget, in MAJOR currency units (10 = 10 EUR). Network
+/// minimums apply (for example TikTok 20 a day).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AdBudget {
+    /// `"daily"` (default) or `"lifetime"` (the whole schedule). A draft
+    /// budget is always daily: leave it `None` there.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    /// The amount in major units.
+    pub amount: f64,
+    /// 3-letter ISO code; must match the ad account's currency.
+    pub currency: String,
+}
+
+/// When a campaign runs (ISO 8601 datetimes).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AdSchedule {
+    /// Start time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_at: Option<String>,
+    /// End time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_at: Option<String>,
+}
+
+/// Body for `POST /ads/boost` (see [`crate::resources::Ads::boost`]).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BoostPostParams {
+    /// OmniSocials id of a published post.
+    pub post_id: String,
+    /// OmniSocials ad account id (from `list_accounts`, picked in the
+    /// dashboard).
+    pub ad_account_id: String,
+    /// The budget; its currency must match the ad account's.
+    pub budget: AdBudget,
+    /// `"engagement"`, `"traffic"`, `"awareness"` or `"video_views"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub objective: Option<String>,
+    /// Unified targeting, e.g. `json!({"countries": ["NL"]})`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub targeting: Option<Value>,
+    /// When the boost runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<AdSchedule>,
+    /// Network-specific creative fields. TikTok (Spark Ads) needs
+    /// `spark_auth_code` (the post owner makes it in the TikTok app: video,
+    /// "...", Ad settings, Ad authorization); Google needs `headlines`,
+    /// `descriptions` and `logo_url`; TikTok traffic boosts need `link`.
+    /// Meta, Pinterest, X and LinkedIn boosts need none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creative: Option<Value>,
+    /// Campaign name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Body for `POST /ads/boost-multi` (see
+/// [`crate::resources::Ads::boost_multi`]): one draft boost per ad account,
+/// each with the SAME budget.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BoostPostMultiParams {
+    /// OmniSocials id of a published post.
+    pub post_id: String,
+    /// Up to 10 ad accounts.
+    pub ad_account_ids: Vec<String>,
+    /// The budget of each boost.
+    pub budget: AdBudget,
+    /// See [`BoostPostParams::objective`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub objective: Option<String>,
+    /// See [`BoostPostParams::targeting`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub targeting: Option<Value>,
+    /// See [`BoostPostParams::schedule`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<AdSchedule>,
+    /// See [`BoostPostParams::creative`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creative: Option<Value>,
+    /// Campaign name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Body for `POST /ads/campaigns` (see [`crate::resources::Ads::create`]).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CreateAdCampaignParams {
+    /// OmniSocials ad account id.
+    pub ad_account_id: String,
+    /// Campaign name.
+    pub name: String,
+    /// The budget.
+    pub budget: AdBudget,
+    /// See [`BoostPostParams::objective`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub objective: Option<String>,
+    /// Unified targeting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub targeting: Option<Value>,
+    /// When the campaign runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<AdSchedule>,
+}
+
+/// Body for `PATCH /ads/campaigns/:id` (see
+/// [`crate::resources::Ads::update`]). Every field is optional.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct UpdateAdCampaignParams {
+    /// New name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// New budget.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<AdBudget>,
+    /// Required to RAISE the budget of a running campaign: the new amount
+    /// again, after the person agreed to it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirm_budget_amount: Option<f64>,
+    /// New targeting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub targeting: Option<Value>,
+    /// New schedule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<AdSchedule>,
+}
+
+/// Body for `POST /ads/research/keywords` (see
+/// [`crate::resources::Ads::research_keywords`]). Give `keywords`, `url` or
+/// both.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct KeywordResearchParams {
+    /// Seed keywords, up to 20.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keywords: Option<Vec<String>>,
+    /// A landing page or homepage to take ideas from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// ISO 3166-1 alpha-2, default `"US"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    /// ISO 639-1, default `"en"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// 1 to 500, default 100.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Only needed when the workspace has more than one Google Ads account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ad_account_id: Option<String>,
+}
+
+/// Body for `POST /ads/research/keywords/metrics` (see
+/// [`crate::resources::Ads::keyword_metrics`]).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct KeywordMetricsParams {
+    /// The exact keywords to measure.
+    pub keywords: Vec<String>,
+    /// ISO 3166-1 alpha-2, default `"US"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    /// ISO 639-1, default `"en"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// Only needed when the workspace has more than one Google Ads account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ad_account_id: Option<String>,
+}
+
+/// One network of [`AdDraftParams::platforms`]: a network key, or a key with
+/// its own daily amount or ad account.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum AdDraftPlatform {
+    /// A network key: `"meta"`, `"pinterest"`, `"tiktok"`, `"linkedin"`,
+    /// `"x"` or `"google"`.
+    Key(String),
+    /// A network with its own daily amount or ad account.
+    Detailed {
+        /// The network key.
+        platform: String,
+        /// The daily amount on this network, in major units.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        budget_amount: Option<f64>,
+        /// The ad account on this network.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ad_account_id: Option<String>,
+    },
+}
+
+impl From<&str> for AdDraftPlatform {
+    fn from(value: &str) -> Self {
+        AdDraftPlatform::Key(value.to_owned())
+    }
+}
+
+impl From<String> for AdDraftPlatform {
+    fn from(value: String) -> Self {
+        AdDraftPlatform::Key(value)
+    }
+}
+
+/// How long a draft runs.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AdDraftSchedule {
+    /// Days; `None` is sent as `null` and runs the ad until it is stopped.
+    pub duration_days: Option<u32>,
+}
+
+/// Who a draft reaches.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AdDraftTargeting {
+    /// ISO country codes.
+    pub countries: Vec<String>,
+    /// `true` (the default) lets the network find the audience (no age or
+    /// gender limits).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatic_audience: Option<bool>,
+    /// Lowest age.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age_min: Option<u32>,
+    /// Highest age.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age_max: Option<u32>,
+    /// `"male"`, `"female"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genders: Option<Vec<String>>,
+    /// `"automatic"` (default) or `"feeds"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placements: Option<String>,
+    /// LinkedIn's EU statement: `"NOT_POLITICAL"` or `"POLITICAL"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub political_intent: Option<String>,
+    /// Meta's special ad categories (housing, employment, financial
+    /// products, ...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub special_ad_categories: Option<Vec<String>>,
+    /// The countries of the special ad categories.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub special_ad_category_country: Option<Vec<String>>,
+    /// Meta's verified payer per regional category.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regional_identities: Option<Value>,
+}
+
+/// One picture or video of a draft ad.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AdMediaFile {
+    /// Public URL.
+    pub url: String,
+    /// `"image"` or `"video"`.
+    #[serde(rename = "type")]
+    pub r#type: String,
+    /// Width in pixels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    /// Height in pixels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    /// Seconds, for a video.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
+    /// Cover picture of a video.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_url: Option<String>,
+}
+
+/// Extra files for one kind of placement.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AdPlacementMedia {
+    /// Meta only, optional: a second picture or video for Stories and
+    /// Reels, upright 9:16 (1080 x 1920), the same kind as the main file.
+    /// Without it Meta fits the main file. Not for the engagement goal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stories_reels: Option<AdMediaFile>,
+}
+
+/// One ad of a draft: written once, mapped onto every network.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AdDraftAd {
+    /// Your own key for the ad.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// Ad name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The pictures or videos.
+    pub media: Vec<AdMediaFile>,
+    /// The main text.
+    pub primary_text: String,
+    /// A second text: the network tests A against B (a second ad).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_text_b: Option<String>,
+    /// Headline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headline: Option<String>,
+    /// Description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// A button key from `capabilities` `ctas`, e.g. `"shop_now"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cta: Option<String>,
+    /// The website the ad opens.
+    pub link: String,
+    /// Per network text that replaces the shared text, e.g.
+    /// `json!({"x": {"primary_text": "..."}})`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overrides: Option<Value>,
+    /// Network-only fields, e.g. `json!({"google": {"business_name": "...",
+    /// "logo": {"url": "..."}}})`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<Value>,
+    /// Extra files per placement (Meta Stories and Reels).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placement_media: Option<AdPlacementMedia>,
+}
+
+/// Body for `POST /ads/drafts` and `PUT /ads/drafts/:group_id` (the full
+/// draft; see [`crate::resources::AdDrafts::create`]).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AdDraftParams {
+    /// Draft name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// `"traffic"`, `"engagement"`, `"awareness"` or `"video_views"`.
+    pub objective: String,
+    /// The networks: `vec!["meta".into(), "linkedin".into()]`, or
+    /// [`AdDraftPlatform::Detailed`] entries for a daily amount or an ad
+    /// account per network.
+    pub platforms: Vec<AdDraftPlatform>,
+    /// The daily amount per network (leave `type` `None`).
+    pub budget: AdBudget,
+    /// How long it runs; `None` leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<AdDraftSchedule>,
+    /// Who it reaches.
+    pub targeting: AdDraftTargeting,
+    /// The ads.
+    pub ads: Vec<AdDraftAd>,
+}
+
+/// Body for `POST /ads/drafts/:group_id/account` (see
+/// [`crate::resources::AdDrafts::attach_account`]).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AttachAdDraftAccountParams {
+    /// The network key.
+    pub platform: String,
+    /// OmniSocials ad account id of the same network.
+    pub ad_account_id: String,
+}
+
+/// Body for `POST /ads/drafts/:group_id/launch` (see
+/// [`crate::resources::AdDrafts::launch`]). Give `confirm_budget_amount`
+/// (one daily amount for every network) or `confirm_budget_amounts` (per
+/// campaign id). Each must equal that campaign's daily amount, else
+/// `400 budget_confirmation_required` and nothing is written.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct LaunchAdDraftParams {
+    /// The daily amount of every network, as the person confirmed it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirm_budget_amount: Option<f64>,
+    /// The daily amount per campaign id, as the person confirmed it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirm_budget_amounts: Option<HashMap<String, f64>>,
 }
 
 // ─── Inbox ───────────────────────────────────────────────────────────────────
@@ -1049,7 +1468,8 @@ pub struct CreateWebhookParams {
     /// HTTPS endpoint that will receive event deliveries.
     pub url: String,
     /// Events to subscribe to: `post.scheduled`, `post.published`,
-    /// `post.failed`, `post.approved`, `post.rejected`.
+    /// `post.failed`, `post.approved`, `post.rejected`, `ad.status_changed`
+    /// (its `data` is the campaign, not a post).
     pub events: Vec<String>,
 }
 

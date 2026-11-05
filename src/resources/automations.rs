@@ -66,8 +66,12 @@ impl Automations<'_> {
     /// OmniSocials) or `facebook_post_id` (a Page post published outside
     /// OmniSocials; implies `"facebook"`), at most one; a `trigger` with
     /// `"scope": "next_post"` or `"any"` needs none. `actions` is required
-    /// (`dm.text`, max 1000 characters). Requires the `automations:write`
-    /// scope (opt-in on the API key). Errors: `400 validation_error`,
+    /// (`dm.text`, max 1000 characters). `actions.follow_gate` (Follow
+    /// first, Instagram only) sends the link only to people who follow the
+    /// account; a person who has not followed yet is an event with outcome
+    /// `"waiting"` (see [`CreateAutomationParams::actions`]). Requires the
+    /// `automations:write` scope (opt-in on the API key). Errors:
+    /// `400 validation_error`, `400 follow_gate_instagram_only`,
     /// `400 post_not_instagram`, `400 post_not_facebook`,
     /// `400 post_required`, `404 post_not_found`,
     /// `404 instagram_media_not_found`, `404 facebook_post_not_found`,
@@ -84,7 +88,9 @@ impl Automations<'_> {
     /// keep their value: new `trigger.keywords` keep the kinds, the scope
     /// and the match; a new `actions.dm.text` keeps the public reply;
     /// `limits.stop_at` keeps `max_sends`. `public_reply.enabled: false` or
-    /// `variations: []` turns the public reply off; `limits.max_sends:
+    /// `variations: []` turns the public reply off; `follow_gate.enabled:
+    /// false` turns Follow first off and keeps its texts, new texts keep the
+    /// switch, and `"follow_gate": null` turns it off; `limits.max_sends:
     /// null` removes that limit. `status: "paused"` pauses and `"active"`
     /// resumes; another `post_id` / `instagram_media_id` /
     /// `facebook_post_id` moves the automation to that post. The platform
@@ -110,8 +116,8 @@ impl Automations<'_> {
     /// `GET /automations/:id/events` - the automation's activity: one event
     /// per person it answered, skipped or failed on. Filter by `outcome`
     /// (`"sent"`, `"skipped"`, `"failed"`, `"pending"`, `"queued"`,
-    /// `"opted_out"`); `limit` is 1 to 100 (default 25), `offset` skips. Requires the `automations:read`
-    /// scope.
+    /// `"opted_out"`, `"waiting"`); `limit` is 1 to 100 (default 25),
+    /// `offset` skips. Requires the `automations:read` scope.
     ///
     /// The response is not the plain list envelope: `{"data": [...],
     /// "counts": {"sent": 12, "skipped": 3}, "pagination": {...}}`, where
@@ -119,10 +125,12 @@ impl Automations<'_> {
     /// events is left out). Each event carries `kind` (`comment`, `dm`,
     /// `story_reply`), `outcome`, `reason` / `reason_label` (X adds the skip
     /// reasons `dms_closed`, `no_credits`, `opted_out` and
-    /// `automation_off`), `person`
+    /// `automation_off`; Follow first adds `already_waiting`), `person`
     /// (`id`, `username`; on Facebook the person's name, since Facebook has
     /// no @handle), `trigger_id`, `trigger_text`, `message` (the DM
-    /// sent), `public_reply`, `platform_message_id`, `created_at` and
+    /// sent), `public_reply`, `platform_message_id`, `follow_gate` (Follow
+    /// first: `state` `"waiting"` or `"done"`, `asked_at`, `taps`,
+    /// `followed`, `checked`, `after_ask`; else null), `created_at` and
     /// `sent_at`.
     pub async fn list_events(
         &self,

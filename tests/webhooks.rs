@@ -64,6 +64,24 @@ fn rejected_event_keeps_its_approval_object() {
 }
 
 #[test]
+fn ad_status_changed_event_carries_the_campaign() {
+    let payload = r#"{"id":"evt_4","type":"ad.status_changed","created_at":"2026-07-13T10:00:05Z","data":{"campaign_id":42,"workspace_id":"456","name":"Boost: Summer launch post","platform":"meta","campaign_type":"boost","status":"active","previous_status":"pending_review","external_campaign_id":"23851234567890123","budget":{"type":"daily","amount":10,"currency":"EUR"}}}"#;
+    let header = sign(SECRET, now(), payload);
+    let event =
+        verify_signature(payload.as_bytes(), &header, SECRET, DEFAULT_TOLERANCE_SECS).unwrap();
+
+    // The data is the campaign, not a post.
+    assert_eq!(event["type"], "ad.status_changed");
+    assert_eq!(event["data"]["campaign_id"], 42);
+    assert_eq!(event["data"]["status"], "active");
+    assert_eq!(event["data"]["previous_status"], "pending_review");
+    assert_eq!(event["data"]["campaign_type"], "boost");
+    assert_eq!(event["data"]["budget"]["amount"], 10);
+    assert_eq!(event["data"]["budget"]["currency"], "EUR");
+    assert!(event["data"].get("post_id").is_none());
+}
+
+#[test]
 fn approved_event_has_a_null_reason() {
     let payload = r#"{"id":"evt_3","type":"post.approved","data":{"post_id":"123456","status":"scheduled","targets":[],"approval":{"status":"approved","decided_by":"c4a09e1d","reason":null}}}"#;
     let header = sign(SECRET, now(), payload);

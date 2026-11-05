@@ -164,7 +164,25 @@ for event in events["data"].as_array().unwrap() {
 }
 ```
 
-The events response is `data`, `counts` and `pagination`, not the plain list: `counts` is the number of events per outcome (`sent`, `skipped`, `failed`, `pending`, `queued`, `opted_out`). An automation can also listen on a post published outside OmniSocials (`client.automations().create(CreateAutomationParams { instagram_media_id: Some(...), actions: json!({...}), ..Default::default() })`), on the next post the workspace publishes (`trigger: Some(json!({"scope": "next_post"}))`) or on every post (`"scope": "any"`), and on DMs and story replies (`"kinds": ["dm", "story_reply"]`).
+The events response is `data`, `counts` and `pagination`, not the plain list: `counts` is the number of events per outcome (`sent`, `skipped`, `failed`, `pending`, `queued`, `opted_out`, `waiting`). An automation can also listen on a post published outside OmniSocials (`client.automations().create(CreateAutomationParams { instagram_media_id: Some(...), actions: json!({...}), ..Default::default() })`), on the next post the workspace publishes (`trigger: Some(json!({"scope": "next_post"}))`) or on every post (`"scope": "any"`), and on DMs and story replies (`"kinds": ["dm", "story_reply"]`).
+
+Follow first (`"follow_gate"` in the actions, Instagram only) sends the link only to people who follow the account. On a comment the private reply is a first message with one button; a tap makes OmniSocials ask Instagram whether the person follows. A follower gets the DM text, anyone else gets the `not_following` message with its button, and every later tap checks again. A DM or a story reply is checked at once. When Instagram gives no answer the link goes out anyway. Texts hold 640 characters and buttons 20; leave them out for the defaults. A person who has not followed yet is an event with outcome `waiting` and `event["follow_gate"]` (`state`, `taps`, `followed`, `checked`, `after_ask`); `stats.followed` counts the people who followed after the ask. `"enabled": true` on a Facebook or X automation is a `400 follow_gate_instagram_only`.
+
+```rust
+use omnisocials::UpdateAutomationParams;
+
+client.automations().update(automation_id, UpdateAutomationParams {
+    actions: Some(json!({
+        "dm": { "text": "Here is the guide: https://example.com/guide" },
+        "follow_gate": {
+            "enabled": true,
+            "first_message": { "text": "Tap the button and I'll send you the link 👇", "button": "Send me the link" },
+            "not_following": { "text": "Almost there! Follow @yourbrand first, then tap the button again.", "button": "I follow now" }
+        }
+    })),
+    ..Default::default()
+}).await?;
+```
 
 A Facebook Page works the same way, and the DM lands in Messenger: set `platform: Some("facebook".into())` on `CreateAutomationParams`, or `facebook_post_id` for a Page post published outside OmniSocials. On a post, `comment_dm_automation: Some(json!({"platforms": ["instagram", "facebook"], ...}))` makes one automation per channel with the same keywords and DM. Facebook has no story replies.
 
@@ -768,9 +786,9 @@ let liked = client.inbox().like(message_id, true).await?; // like
 client.inbox().like(message_id, false).await?;            // unlike
 println!("{}", liked["data"]["liked"]); // true
 
-// Delete a comment outright (Facebook, Instagram, TikTok; YouTube: hide
-// instead). Replies under it go with it; their ids come back as
-// `removed_reply_ids`.
+// Delete a comment outright, or one of your own replies (Facebook,
+// Instagram, TikTok; YouTube: hide instead). Replies under it go with it;
+// their ids come back as `removed_reply_ids`.
 client.inbox().delete_message(message_id).await?;
 ```
 
@@ -918,9 +936,99 @@ if let Some(error) = result.get("error") {
 
 Without `source` the list reads the Pinterest catalog (with `price`, `currency`, `availability` and `item_id`) when the connection has catalog access, else the account's own Pins. Catalog access is given one time in the OmniSocials composer: Pinterest options, Add products, Connect catalog. `source: Some("pins".into())` scans up to 250 Pins per call, so `products` can be empty while `bookmark` is set; call again with the bookmark in `ListPinterestProductsParams.bookmark`. To check one Pin id or Pin link before you post, call `client.pinterest().validate_product("813744226420795884").await?`. On `posts().update` the `pinterest` value replaces the stored one, so leave `product_tags` out to remove the tags.
 
+## Ads
+
+Boost a published post or create a new ad on Meta, Pinterest, TikTok, LinkedIn, X and Google. Ads spend real money, so every call that starts or raises spend asks for the amount again: `ads().activate`, `ads().activate_multi`, `ads().drafts().launch` and a budget raise through `ads().update`. Show the person the amount first and pass it only after they agree. These calls (and `ads().resume`) are not retried after a 5xx or a connection error, because the first attempt may have started the ad: read the campaign or the draft to see what happened. A 429 is still retried.
+
+The `ads:read` and `ads:write` scopes are opt-in: create the API key with **Ads** switched on (Settings, API). A key without them gets `Error::PermissionDenied` with code `insufficient_scope`. Ad accounts are connected and picked in the OmniSocials dashboard. Budgets are in major units (10 = 10 EUR) in the ad account's currency. Campaign and ad account ids are strings (`"12"`), as the API sends them and like every other id in this crate. A campaign carries `createdAt` and `updatedAt` in camelCase; an ad account carries `created_at`.
+
+### Create an ad (draft, then launch)
+
+```rust
+use omnisocials::{
+    AdBudget, AdDraftAd, AdDraftParams, AdDraftSchedule, AdDraftTargeting, AdMediaFile,
+    LaunchAdDraftParams,
+};
+
+let caps = client.ads().capabilities().await?;
+println!("{} {}", caps["data"]["create_networks"], caps["data"]["network_states"]);
+
+let draft = client.ads().drafts().create(AdDraftParams {
+    name: Some("Autumn sale".into()),
+    objective: "traffic".into(),
+    platforms: vec!["meta".into(), "linkedin".into()],
+    budget: AdBudget { amount: 10.0, currency: "EUR".into(), ..Default::default() },
+    schedule: Some(AdDraftSchedule { duration_days: Some(7) }),
+    targeting: AdDraftTargeting {
+        countries: vec!["NL".into(), "BE".into()],
+        automatic_audience: Some(true),
+        ..Default::default()
+    },
+    ads: vec![AdDraftAd {
+        media: vec![AdMediaFile {
+            url: "https://example.com/sale.jpg".into(),
+            r#type: "image".into(),
+            width: Some(1080),
+            height: Some(1350),
+            ..Default::default()
+        }],
+        primary_text: "30% off everything this week".into(),
+        headline: Some("Autumn sale".into()),
+        cta: Some("shop_now".into()),
+        link: "https://example.com/sale".into(),
+        ..Default::default()
+    }],
+}).await?;
+let group_id = draft["data"]["group_id"].as_str().unwrap();
+
+// A draft spends nothing. Hand draft["data"]["review_url"] to the person, or
+// start it after they confirmed 10 EUR a day per network:
+let launch = client.ads().drafts().launch(group_id, LaunchAdDraftParams {
+    confirm_budget_amount: Some(10.0),
+    ..Default::default()
+}).await?;
+for result in launch["data"]["results"].as_array().unwrap() {
+    println!("{} {} {}", result["platform"], result["ok"], result["error"]);
+}
+```
+
+A draft needs no ad account; `client.ads().drafts().attach_account(group_id, AttachAdDraftAccountParams { platform, ad_account_id })` sets one, and `campaigns[].readiness` says what still stops a network. `drafts().update` replaces the draft with the full body (`PUT`). On Meta an ad can carry a second upright 9:16 file for Stories and Reels: `placement_media: Some(AdPlacementMedia { stories_reels: Some(AdMediaFile { .. }) })`.
+
+### Boost a post
+
+```rust
+use omnisocials::{AdBudget, BoostPostParams};
+use serde_json::json;
+
+let accounts = client.ads().list_accounts().await?;
+let meta = accounts["data"]
+    .as_array()
+    .unwrap()
+    .iter()
+    .find(|a| a["platform"] == "meta" && a["is_selected"] == true)
+    .expect("no Meta ad account picked");
+// Ad ids arrive as strings, e.g. "12".
+let account_id = meta["id"].as_str().unwrap();
+let currency = meta["account_info"]["currency"].as_str().unwrap_or("EUR");
+
+let boost = client.ads().boost(BoostPostParams {
+    post_id: "12345".into(),
+    ad_account_id: account_id.into(),
+    budget: AdBudget { r#type: Some("daily".into()), amount: 5.0, currency: currency.into() },
+    targeting: Some(json!({ "countries": ["NL"] })),
+    ..Default::default()
+}).await?;
+let campaign_id = boost["data"]["id"].as_str().unwrap();
+
+// The boost is a draft. Start it only after the person confirmed 5 a day:
+client.ads().activate(campaign_id, 5.0).await?;
+```
+
+`client.ads().boost_multi(...)` makes one draft boost per ad account (up to 10, the same budget each). `client.ads().suggestions()` lists posts that do better than your median, `client.ads().overview()` the totals, and `list`, `get`, `pause`, `resume` and `delete` manage campaigns. Keyword ideas through the connected Google Ads account: `client.ads().research_keywords(KeywordResearchParams { keywords: Some(vec!["running shoes".into()]), country: Some("NL".into()), ..Default::default() })` and `client.ads().keyword_metrics(KeywordMetricsParams { keywords: vec![...], ..Default::default() })`.
+
 ## Webhooks
 
-Events: `post.scheduled`, `post.published`, `post.failed`, `post.approved` (the last step of a post's approval workflow is approved) and `post.rejected` (an approver rejects the post; it will not publish). The two approval events carry `data.approval` with `status`, `decided_by` (the approver's user id) and `reason` (`null` on `post.approved`), and an empty `data.targets`.
+Events: `post.scheduled`, `post.published`, `post.failed`, `post.approved` (the last step of a post's approval workflow is approved) and `post.rejected` (an approver rejects the post; it will not publish). The two approval events carry `data.approval` with `status`, `decided_by` (the approver's user id) and `reason` (`null` on `post.approved`), and an empty `data.targets`. `ad.status_changed` fires when an ad campaign changes status (for example `pending_review` to `active` or `rejected`); its `data` is the campaign, not a post: `campaign_id`, `workspace_id`, `name`, `platform`, `campaign_type`, `status`, `previous_status`, `external_campaign_id` and `budget`.
 
 ### Manage endpoints
 
@@ -975,6 +1083,10 @@ async fn omnisocials_webhook(headers: HeaderMap, body: Bytes) -> StatusCode {
                 Some("post.rejected") => {
                     eprintln!("Rejected: {} {}", event["data"]["post_id"], event["data"]["approval"]["reason"]);
                 }
+                Some("ad.status_changed") => {
+                    // The data is the campaign, not a post.
+                    println!("Ad: {} {}", event["data"]["campaign_id"], event["data"]["status"]);
+                }
                 _ => {}
             }
             StatusCode::OK
@@ -987,6 +1099,49 @@ let app: Router = Router::new().route("/omnisocials/webhook", post(omnisocials_w
 ```
 
 `verify_signature` uses a constant-time comparison, rejects timestamps older than the tolerance (300 seconds here; replay protection), returns `Error::WebhookVerification` on any failure, and returns the parsed event on success.
+
+## Limits and feature requests
+
+`client.limits().list(...)` lists what OmniSocials cannot do, why (`says`) and what to do instead (`instead`): platform rules, features not built yet, features that work in the OmniSocials app only. Read it before you tell a person that something is not possible. When the person still wants a `requestable` entry, send a feature request with its `limit_id`. The request is stored for the person who owns the key; they see it in OmniSocials (Settings, Request a feature) and get an email when its status changes. Works with every key, no scope needed.
+
+```rust
+use omnisocials::{CreateFeatureRequestParams, Error, ListLimitsParams};
+
+let limits = client
+    .limits()
+    .list(ListLimitsParams { platform: Some("telegram".into()), ..Default::default() }) // area: "posts", "inbox", ...
+    .await?;
+for limit in limits["data"].as_array().into_iter().flatten() {
+    println!("{}: {} requestable={}", limit["id"], limit["says"], limit["requestable"]);
+}
+
+match client
+    .feature_requests()
+    .create(CreateFeatureRequestParams {
+        summary: "Post our daily update to the Announcements topic of our Telegram group, not to the whole group.".into(),
+        platform: Some("telegram".into()),
+        limit_id: Some("telegram.forum_topics".into()),
+        ..Default::default()
+    })
+    .await
+{
+    // "created" (new), "voted" (added a vote to your organisation's open request)
+    // or "already_requested" (you asked before; data is that request)
+    Ok(result) => println!("{} {} {}", result["outcome"], result["data"]["id"], result["data"]["status"]),
+    Err(Error::Api { code, body, .. }) if code.as_deref() == Some("not_requestable") => {
+        // A platform rule or a choice of OmniSocials: nothing was stored.
+        let body = body.unwrap_or_default();
+        println!("{} {}", body["error"]["limit"]["says"], body["error"]["limit"]["instead"]);
+    }
+    Err(err) => return Err(err),
+}
+
+let mine = client.feature_requests().list().await?; // newest first, at most 50
+let first_id = mine["data"][0]["id"].as_i64().unwrap_or_default();
+let one = client.feature_requests().get(first_id).await?; // status, team_answer, team_replies
+```
+
+A limit is `{"id", "kind", "kind_label", "area", "platforms", "title", "says", "instead", "requestable"}`; `kind` is `platform`, `by_design`, `not_built`, `beta`, `dashboard_only` or `needs_setup`, and `requestable` is false for `platform` and `by_design`. `limits().list()` also returns `kinds` (a label per kind). A request carries `status` (`open`, `in_progress`, `completed`, `declined`), `votes_count`, `team_answer` and `team_replies`. `summary` is 10 to 1000 characters (what the person wants to do and why), `title` at most 120 (made from the summary when `None`); `area` is one of posts, media, inbox, analytics, automations, accounts, ads, team, other. Errors: `400 invalid_summary` / `invalid_title` / `invalid_platform` / `invalid_area` / `unknown_limit` (`Error::Validation`), `409 not_requestable` (`Error::Api`, the entry is in `error.limit` of `body`), `429 too_many_requests` (`Error::RateLimit`, 10 an hour per person), and `404 not_found` on `get`.
 
 ## Health
 

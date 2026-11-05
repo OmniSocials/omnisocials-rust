@@ -14,8 +14,9 @@ use serde_json::Value;
 
 use crate::error::Error;
 use crate::resources::Tags;
+use crate::resources::{FeatureRequests, Limits};
 use crate::resources::{
-    Accounts, Analytics, ApprovalWorkflows, Audio, Automations, Folders, HashtagSets, Inbox,
+    Accounts, Ads, Analytics, ApprovalWorkflows, Audio, Automations, Folders, HashtagSets, Inbox,
     Locations, Media, Pinterest, Posts, Webhooks,
 };
 
@@ -87,7 +88,8 @@ impl ClientBuilder {
         self
     }
 
-    /// Automatic retries on 429 / 5xx / connection errors. Defaults to 2.
+    /// Automatic retries on 429 / 5xx / connection errors. Defaults to 2. A
+    /// call that can start or raise ad spend is retried on a 429 only.
     pub fn max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = Some(max_retries);
         self
@@ -133,6 +135,16 @@ impl ClientBuilder {
             max_retries: self.max_retries.unwrap_or(DEFAULT_MAX_RETRIES),
         })
     }
+}
+
+/// Which failures the core loop may send again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Retry {
+    /// A 429, a 5xx and a connection error (the default).
+    All,
+    /// A 429 only. A call that can start or raise ad spend uses it: after a
+    /// 5xx or a timeout the first attempt may have gone through.
+    RateLimit,
 }
 
 /// Request body shapes the core loop knows how to (re)build per attempt.
@@ -244,6 +256,15 @@ impl Client {
         Automations { client: self }
     }
 
+    /// Ads: list_accounts, capabilities, list, get, boost, boost_multi,
+    /// create, update, activate, activate_multi, pause, resume, delete,
+    /// overview, suggestions, research_keywords, keyword_metrics, and the
+    /// "Create an ad" drafts through [`Ads::drafts`]. Calls that start or
+    /// raise ad spend are not retried after a 5xx or a connection error.
+    pub fn ads(&self) -> Ads<'_> {
+        Ads { client: self }
+    }
+
     /// Webhook endpoint management: list, get, create, update, delete,
     /// rotate_secret. (Signature verification lives in
     /// [`crate::webhooks::verify_signature`].)
@@ -254,6 +275,17 @@ impl Client {
     /// Social Inbox: list_conversations, get_messages, mark_read, reply.
     pub fn inbox(&self) -> Inbox<'_> {
         Inbox { client: self }
+    }
+
+    /// What OmniSocials cannot do, why, and what to do instead: list.
+    pub fn limits(&self) -> Limits<'_> {
+        Limits { client: self }
+    }
+
+    /// Feature requests to the OmniSocials team, for the person who owns
+    /// the key: create, list, get.
+    pub fn feature_requests(&self) -> FeatureRequests<'_> {
+        FeatureRequests { client: self }
     }
 
     /// `GET /health` (no scopes required).
@@ -268,21 +300,37 @@ impl Client {
         path: &str,
         query: Vec<(&'static str, String)>,
     ) -> Result<Value, Error> {
-        self.request(Method::GET, path, query, RequestBody::Empty).await
+        self.request(Method::GET, path, query, RequestBody::Empty, Retry::All).await
     }
 
     pub(crate) async fn post_json<T: Serialize>(&self, path: &str, body: &T) -> Result<Value, Error> {
+        self.send_json(Method::POST, path, body, Retry::All).await
+    }
+
+    pub(crate) async fn post_empty(&self, path: &str) -> Result<Value, Error> {
+        self.request(Method::POST, path, Vec::new(), RequestBody::Empty, Retry::All).await
+    }
+
+    /// A JSON request with an explicit retry policy.
+    pub(crate) async fn send_json<T: Serialize>(
+        &self,
+        method: Method,
+        path: &str,
+        body: &T,
+        retry: Retry,
+    ) -> Result<Value, Error> {
         let value = serde_json::to_value(body).map_err(|err| Error::Validation {
             status: 400,
             code: Some("serialization_error".into()),
             message: format!("Could not serialize the request body: {err}"),
             body: None,
         })?;
-        self.request(Method::POST, path, Vec::new(), RequestBody::Json(value)).await
+        self.request(method, path, Vec::new(), RequestBody::Json(value), retry).await
     }
 
-    pub(crate) async fn post_empty(&self, path: &str) -> Result<Value, Error> {
-        self.request(Method::POST, path, Vec::new(), RequestBody::Empty).await
+    /// A POST without a body, with an explicit retry policy.
+    pub(crate) async fn post_empty_with(&self, path: &str, retry: Retry) -> Result<Value, Error> {
+        self.request(Method::POST, path, Vec::new(), RequestBody::Empty, retry).await
     }
 
     pub(crate) async fn post_multipart(
@@ -297,34 +345,35 @@ impl Client {
             path,
             Vec::new(),
             RequestBody::Multipart { file, filename, fields },
+            Retry::All,
         )
         .await
     }
 
     pub(crate) async fn patch_json<T: Serialize>(&self, path: &str, body: &T) -> Result<Value, Error> {
-        let value = serde_json::to_value(body).map_err(|err| Error::Validation {
-            status: 400,
-            code: Some("serialization_error".into()),
-            message: format!("Could not serialize the request body: {err}"),
-            body: None,
-        })?;
-        self.request(Method::PATCH, path, Vec::new(), RequestBody::Json(value)).await
+        self.send_json(Method::PATCH, path, body, Retry::All).await
+    }
+
+    pub(crate) async fn put_json<T: Serialize>(&self, path: &str, body: &T) -> Result<Value, Error> {
+        self.send_json(Method::PUT, path, body, Retry::All).await
     }
 
     pub(crate) async fn delete(&self, path: &str) -> Result<Value, Error> {
-        self.request(Method::DELETE, path, Vec::new(), RequestBody::Empty).await
+        self.request(Method::DELETE, path, Vec::new(), RequestBody::Empty, Retry::All).await
     }
 
     /// Core request loop: sends the request and retries 429 / 5xx /
     /// connection errors with exponential backoff + jitter (honoring
-    /// `Retry-After` when present). Returns the parsed response body as-is;
-    /// `204 No Content` returns [`Value::Null`].
+    /// `Retry-After` when present). With [`Retry::RateLimit`] only a 429 is
+    /// sent again. Returns the parsed response body as-is; `204 No Content`
+    /// returns [`Value::Null`].
     async fn request(
         &self,
         method: Method,
         path: &str,
         query: Vec<(&'static str, String)>,
         body: RequestBody,
+        retry: Retry,
     ) -> Result<Value, Error> {
         let url = format!(
             "{}{}{}",
@@ -363,11 +412,12 @@ impl Client {
                 }
             }
 
-            // Connection errors (incl. timeouts): retryable.
+            // Connection errors (incl. timeouts): retryable, unless the call
+            // may have started ad spend.
             let response = match request.send().await {
                 Ok(response) => response,
                 Err(err) => {
-                    if attempt < self.max_retries {
+                    if retry == Retry::All && attempt < self.max_retries {
                         sleep(self.backoff(attempt, None)).await;
                         attempt += 1;
                         continue;
@@ -396,7 +446,7 @@ impl Client {
                 .and_then(|value| value.to_str().ok())
                 .and_then(parse_retry_after);
 
-            let retryable = status == 429 || status >= 500;
+            let retryable = status == 429 || (status >= 500 && retry == Retry::All);
             if retryable && attempt < self.max_retries {
                 sleep(self.backoff(attempt, retry_after)).await;
                 attempt += 1;

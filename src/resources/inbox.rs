@@ -230,8 +230,9 @@ impl Inbox<'_> {
             .await
     }
 
-    /// `DELETE /inbox/messages/:id` - delete a comment someone left on one of
-    /// your posts, on the platform and from the inbox (scope `inbox:write`).
+    /// `DELETE /inbox/messages/:id` - delete a comment on one of your posts,
+    /// on the platform and from the inbox (scope `inbox:write`): a comment
+    /// someone left, or one of your own replies (direction `outgoing`).
     /// Facebook, Instagram and TikTok comments only: YouTube's API does not
     /// let a channel delete other people's comments, hide those instead
     /// ([`hide`](Self::hide)). Replies under the deleted comment go with it

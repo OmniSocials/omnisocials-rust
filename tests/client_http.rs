@@ -7,8 +7,9 @@ use std::net::TcpListener;
 use std::thread::JoinHandle;
 
 use omnisocials::{
-    Client, CreatePostParams, Error, ListPinterestProductsParams, ListPostsParams,
-    SearchLocationsParams,
+    AdBudget, AdDraftAd, AdDraftParams, AdDraftSchedule, AdDraftTargeting, AdMediaFile, Client,
+    CreatePostParams, Error, LaunchAdDraftParams, ListPinterestProductsParams, ListPostsParams,
+    SearchLocationsParams, UpdateAdCampaignParams,
 };
 
 // ─── Stub server ─────────────────────────────────────────────────────────────
@@ -31,7 +32,8 @@ fn http_response(status: u16, reason: &str, extra_headers: &[(&str, &str)], body
 }
 
 /// Serve one canned response per incoming connection, capturing each raw
-/// request. Returns the base URL and a handle resolving to the captures.
+/// request. An empty response closes the connection without an answer.
+/// Returns the base URL and a handle resolving to the captures.
 fn spawn_stub(responses: Vec<String>) -> (String, JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub listener");
     let base_url = format!("http://{}", listener.local_addr().unwrap());
@@ -427,6 +429,243 @@ async fn maps_status_codes_to_error_variants() {
         other => panic!("expected RateLimit, got {other:?}"),
     }
     assert!(matches!(errors[6], Error::Server { status: 500, .. }), "{:?}", errors[6]);
+}
+
+// ─── Ads ─────────────────────────────────────────────────────────────────────
+
+fn request_line(raw: &str) -> &str {
+    raw.lines().next().unwrap_or_default()
+}
+
+fn request_body(raw: &str) -> serde_json::Value {
+    let start = raw.find("\r\n\r\n").unwrap() + 4;
+    serde_json::from_str(&raw[start..]).unwrap()
+}
+
+fn draft_params() -> AdDraftParams {
+    AdDraftParams {
+        name: Some("Autumn sale".into()),
+        objective: "traffic".into(),
+        platforms: vec!["meta".into()],
+        budget: AdBudget { amount: 10.0, currency: "EUR".into(), ..Default::default() },
+        schedule: Some(AdDraftSchedule { duration_days: Some(7) }),
+        targeting: AdDraftTargeting {
+            countries: vec!["NL".into()],
+            automatic_audience: Some(true),
+            ..Default::default()
+        },
+        ads: vec![AdDraftAd {
+            media: vec![AdMediaFile {
+                url: "https://example.com/sale.jpg".into(),
+                r#type: "image".into(),
+                ..Default::default()
+            }],
+            primary_text: "30% off".into(),
+            link: "https://example.com".into(),
+            ..Default::default()
+        }],
+    }
+}
+
+#[tokio::test]
+async fn ads_draft_create_update_launch_and_activate_requests() {
+    let ok = r#"{"data":{"group_id":"g-1"}}"#;
+    let (base_url, handle) = spawn_stub(vec![
+        http_response(201, "Created", &[], ok),
+        http_response(200, "OK", &[], ok),
+        http_response(200, "OK", &[], r#"{"data":{"group":{"group_id":"g-1"},"results":[{"campaign_id":"7","platform":"meta","ok":true}]}}"#),
+        http_response(200, "OK", &[], r#"{"data":{"id":"7","ad_account_id":"12","status":"pending_review","createdAt":"2026-10-28T10:00:00.000Z"}}"#),
+    ]);
+
+    let client = client_for(&base_url, 0);
+    let created = client.ads().drafts().create(draft_params()).await.unwrap();
+    assert_eq!(created["data"]["group_id"], "g-1");
+    client.ads().drafts().update("g-1", draft_params()).await.unwrap();
+    let launch = client
+        .ads()
+        .drafts()
+        .launch("g-1", LaunchAdDraftParams { confirm_budget_amount: Some(10.0), ..Default::default() })
+        .await
+        .unwrap();
+    assert_eq!(launch["data"]["results"][0]["ok"], true);
+    let activated = client.ads().activate("7", 25.0).await.unwrap();
+    assert_eq!(activated["data"]["status"], "pending_review");
+    // Ad ids arrive as strings and a campaign's timestamps in camelCase; the
+    // id goes straight back into the next call.
+    assert_eq!(activated["data"]["id"].as_str(), Some("7"));
+    assert_eq!(activated["data"]["ad_account_id"], "12");
+    assert_eq!(activated["data"]["createdAt"], "2026-10-28T10:00:00.000Z");
+
+    let captured = handle.join().unwrap();
+    let draft_body = serde_json::json!({
+        "name": "Autumn sale",
+        "objective": "traffic",
+        "platforms": ["meta"],
+        "budget": {"amount": 10.0, "currency": "EUR"},
+        "schedule": {"duration_days": 7},
+        "targeting": {"countries": ["NL"], "automatic_audience": true},
+        "ads": [{
+            "media": [{"url": "https://example.com/sale.jpg", "type": "image"}],
+            "primary_text": "30% off",
+            "link": "https://example.com"
+        }]
+    });
+    assert_eq!(request_line(&captured[0]), "POST /ads/drafts HTTP/1.1");
+    assert_eq!(request_body(&captured[0]), draft_body);
+    assert_eq!(request_line(&captured[1]), "PUT /ads/drafts/g-1 HTTP/1.1");
+    assert_eq!(request_body(&captured[1]), draft_body);
+    assert_eq!(request_line(&captured[2]), "POST /ads/drafts/g-1/launch HTTP/1.1");
+    assert_eq!(request_body(&captured[2]), serde_json::json!({"confirm_budget_amount": 10.0}));
+    assert_eq!(request_line(&captured[3]), "POST /ads/campaigns/7/activate HTTP/1.1");
+    assert_eq!(request_body(&captured[3]), serde_json::json!({"confirm_budget_amount": 25.0}));
+}
+
+// A call that can start or raise ad spend may have gone through when the API
+// answers 5xx or drops the connection, so it is sent exactly once. Each stub
+// below holds one more answer than the money call should use: a retry would
+// take it and succeed, so the follow-up health check proves there was none.
+#[tokio::test]
+async fn ads_money_calls_are_not_retried_after_a_502() {
+    let bad_gateway = || {
+        http_response(502, "Bad Gateway", &[("Retry-After", "0")], r#"{"error":{"code":"bad_gateway","message":"upstream"}}"#)
+    };
+    let healthy = || http_response(200, "OK", &[], r#"{"status":"ok"}"#);
+    let (base_url, handle) = spawn_stub(vec![
+        bad_gateway(), healthy(),
+        bad_gateway(), healthy(),
+        bad_gateway(), healthy(),
+        bad_gateway(), healthy(),
+        bad_gateway(), healthy(),
+    ]);
+    let client = client_for(&base_url, 2);
+    let ads = client.ads();
+
+    let err = ads
+        .drafts()
+        .launch("g-1", LaunchAdDraftParams { confirm_budget_amount: Some(10.0), ..Default::default() })
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Server { status: 502, .. }), "{err:?}");
+    client.health().await.unwrap();
+
+    let err = ads.activate("7", 25.0).await.unwrap_err();
+    assert!(matches!(err, Error::Server { status: 502, .. }), "{err:?}");
+    client.health().await.unwrap();
+
+    assert!(ads.activate_multi(&["7", "8"], 25.0).await.is_err());
+    client.health().await.unwrap();
+    assert!(ads.resume("7").await.is_err());
+    client.health().await.unwrap();
+    let raise = UpdateAdCampaignParams {
+        budget: Some(AdBudget { amount: 40.0, currency: "EUR".into(), ..Default::default() }),
+        confirm_budget_amount: Some(40.0),
+        ..Default::default()
+    };
+    assert!(ads.update("7", raise).await.is_err());
+    client.health().await.unwrap();
+
+    let lines: Vec<String> = handle
+        .join()
+        .unwrap()
+        .iter()
+        .map(|raw| request_line(raw).to_owned())
+        .collect();
+    assert_eq!(
+        lines,
+        vec![
+            "POST /ads/drafts/g-1/launch HTTP/1.1",
+            "GET /health HTTP/1.1",
+            "POST /ads/campaigns/7/activate HTTP/1.1",
+            "GET /health HTTP/1.1",
+            "POST /ads/campaigns/activate-multi HTTP/1.1",
+            "GET /health HTTP/1.1",
+            "POST /ads/campaigns/7/resume HTTP/1.1",
+            "GET /health HTTP/1.1",
+            "PATCH /ads/campaigns/7 HTTP/1.1",
+            "GET /health HTTP/1.1",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn ads_money_call_is_not_retried_after_a_dropped_connection() {
+    let (base_url, handle) = spawn_stub(vec![
+        String::new(), // read the request, then close without an answer
+        http_response(200, "OK", &[], r#"{"status":"ok"}"#),
+    ]);
+    let client = client_for(&base_url, 2);
+
+    let err = client.ads().activate("7", 25.0).await.unwrap_err();
+    assert!(matches!(err, Error::Connection(_)), "expected Connection, got {err:?}");
+    client.health().await.unwrap();
+
+    let captured = handle.join().unwrap();
+    assert_eq!(request_line(&captured[0]), "POST /ads/campaigns/7/activate HTTP/1.1");
+    assert_eq!(request_line(&captured[1]), "GET /health HTTP/1.1");
+}
+
+#[tokio::test]
+async fn ads_money_call_is_retried_after_a_429() {
+    let (base_url, handle) = spawn_stub(vec![
+        http_response(429, "Too Many Requests", &[("Retry-After", "0")], r#"{"error":{"code":"rate_limit_exceeded","message":"slow down"}}"#),
+        http_response(200, "OK", &[], r#"{"data":{"group":{"group_id":"g-1"},"results":[]}}"#),
+    ]);
+    let client = client_for(&base_url, 2);
+
+    client
+        .ads()
+        .drafts()
+        .launch("g-1", LaunchAdDraftParams { confirm_budget_amount: Some(10.0), ..Default::default() })
+        .await
+        .unwrap();
+    let captured = handle.join().unwrap();
+    assert_eq!(captured.len(), 2);
+    assert_eq!(request_line(&captured[1]), "POST /ads/drafts/g-1/launch HTTP/1.1");
+}
+
+#[tokio::test]
+async fn ads_read_is_retried_after_a_502() {
+    let (base_url, handle) = spawn_stub(vec![
+        http_response(502, "Bad Gateway", &[("Retry-After", "0")], r#"{"error":{"code":"bad_gateway","message":"upstream"}}"#),
+        http_response(200, "OK", &[], r#"{"data":{"networks":[],"create_networks":["meta"]}}"#),
+    ]);
+    let client = client_for(&base_url, 1);
+
+    let caps = client.ads().capabilities().await.unwrap();
+    assert_eq!(caps["data"]["create_networks"][0], "meta");
+    let captured = handle.join().unwrap();
+    assert_eq!(captured.len(), 2);
+    assert_eq!(request_line(&captured[0]), "GET /ads/capabilities HTTP/1.1");
+    assert_eq!(request_line(&captured[1]), "GET /ads/capabilities HTTP/1.1");
+}
+
+#[tokio::test]
+async fn ads_list_builds_the_query_and_encodes_ids() {
+    let (base_url, handle) = spawn_stub(vec![
+        http_response(200, "OK", &[], r#"{"data":[],"pagination":{"total":0}}"#),
+        http_response(200, "OK", &[], r#"{"data":{"deleted":true}}"#),
+    ]);
+    let client = client_for(&base_url, 0);
+
+    client
+        .ads()
+        .list(omnisocials::ListAdCampaignsParams {
+            status: Some("active".into()),
+            campaign_type: Some("boost".into()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let deleted = client.ads().drafts().delete("g 1/x").await.unwrap();
+    assert_eq!(deleted["data"]["deleted"], true);
+
+    let captured = handle.join().unwrap();
+    assert_eq!(
+        request_line(&captured[0]),
+        "GET /ads/campaigns?status=active&campaign_type=boost&limit=10 HTTP/1.1"
+    );
+    assert_eq!(request_line(&captured[1]), "DELETE /ads/drafts/g%201%2Fx HTTP/1.1");
 }
 
 // ─── Env fallback + builder precedence ───────────────────────────────────────

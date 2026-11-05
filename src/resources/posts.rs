@@ -23,6 +23,12 @@ impl Posts<'_> {
         if let Some(offset) = params.offset {
             query.push(("offset", offset.to_string()));
         }
+        if let Some(start_date) = params.start_date {
+            query.push(("start_date", start_date));
+        }
+        if let Some(end_date) = params.end_date {
+            query.push(("end_date", end_date));
+        }
         if let Some(tag) = params.tag {
             query.push(("tag", tag));
         }

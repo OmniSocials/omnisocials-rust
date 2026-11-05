@@ -4,9 +4,11 @@
 use std::collections::HashMap;
 
 use omnisocials::{
-    CheckMediaParams, Content, CreateAutomationParams, CreateHashtagSetParams, CreatePostParams,
-    MediaEntry, MediaRefs, UpdateAutomationParams, UpdateFolderParams, UpdateHashtagSetParams,
-    UpdateMediaParams, UpdatePostParams, UpdateWebhookParams, UserTag,
+    AdBudget, AdDraftAd, AdDraftParams, AdDraftPlatform, AdDraftSchedule, AdDraftTargeting,
+    AdMediaFile, AdPlacementMedia, BoostPostParams, CheckMediaParams, Content,
+    CreateAutomationParams, CreateHashtagSetParams, CreatePostParams, LaunchAdDraftParams,
+    MediaEntry, MediaRefs, UpdateAdCampaignParams, UpdateAutomationParams, UpdateFolderParams,
+    UpdateHashtagSetParams, UpdateMediaParams, UpdatePostParams, UpdateWebhookParams, UserTag,
 };
 use serde_json::{json, Value};
 
@@ -416,4 +418,102 @@ fn update_webhook_params_drop_none() {
     })
     .unwrap();
     assert_eq!(value, json!({"is_active": false}));
+}
+
+#[test]
+fn ad_draft_params_serialize() {
+    let draft = serde_json::to_value(AdDraftParams {
+        objective: "traffic".into(),
+        platforms: vec![
+            "meta".into(),
+            AdDraftPlatform::Detailed {
+                platform: "linkedin".into(),
+                budget_amount: Some(15.0),
+                ad_account_id: Some("12".into()),
+            },
+        ],
+        budget: AdBudget { amount: 10.0, currency: "EUR".into(), ..Default::default() },
+        // No days: sent as null, the ad runs until it is stopped.
+        schedule: Some(AdDraftSchedule { duration_days: None }),
+        targeting: AdDraftTargeting { countries: vec!["NL".into()], ..Default::default() },
+        ads: vec![AdDraftAd {
+            media: vec![AdMediaFile {
+                url: "https://example.com/sale.mp4".into(),
+                r#type: "video".into(),
+                duration: Some(12.5),
+                ..Default::default()
+            }],
+            primary_text: "30% off".into(),
+            cta: Some("shop_now".into()),
+            link: "https://example.com".into(),
+            placement_media: Some(AdPlacementMedia {
+                stories_reels: Some(AdMediaFile {
+                    url: "https://example.com/sale-9x16.mp4".into(),
+                    r#type: "video".into(),
+                    ..Default::default()
+                }),
+            }),
+            ..Default::default()
+        }],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        draft,
+        json!({
+            "objective": "traffic",
+            "platforms": ["meta", {"platform": "linkedin", "budget_amount": 15.0, "ad_account_id": "12"}],
+            "budget": {"amount": 10.0, "currency": "EUR"},
+            "schedule": {"duration_days": null},
+            "targeting": {"countries": ["NL"]},
+            "ads": [{
+                "media": [{"url": "https://example.com/sale.mp4", "type": "video", "duration": 12.5}],
+                "primary_text": "30% off",
+                "cta": "shop_now",
+                "link": "https://example.com",
+                "placement_media": {"stories_reels": {"url": "https://example.com/sale-9x16.mp4", "type": "video"}}
+            }]
+        })
+    );
+}
+
+#[test]
+fn ad_money_params_serialize() {
+    let boost = serde_json::to_value(BoostPostParams {
+        post_id: "12345".into(),
+        ad_account_id: "12".into(),
+        budget: AdBudget { r#type: Some("daily".into()), amount: 5.0, currency: "EUR".into() },
+        targeting: Some(json!({"countries": ["NL"]})),
+        creative: Some(json!({"spark_auth_code": "spark"})),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(
+        boost,
+        json!({
+            "post_id": "12345",
+            "ad_account_id": "12",
+            "budget": {"type": "daily", "amount": 5.0, "currency": "EUR"},
+            "targeting": {"countries": ["NL"]},
+            "creative": {"spark_auth_code": "spark"}
+        })
+    );
+
+    // A per campaign launch confirmation.
+    let mut amounts = HashMap::new();
+    amounts.insert("7".to_owned(), 10.0);
+    let launch = serde_json::to_value(LaunchAdDraftParams {
+        confirm_budget_amounts: Some(amounts),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(launch, json!({"confirm_budget_amounts": {"7": 10.0}}));
+
+    // A rename sends the name alone.
+    let renamed = serde_json::to_value(UpdateAdCampaignParams {
+        name: Some("Spring".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(renamed, json!({"name": "Spring"}));
 }

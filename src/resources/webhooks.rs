@@ -26,8 +26,12 @@ impl Webhooks<'_> {
 
     /// `POST /webhooks` - register an endpoint for event deliveries
     /// (`post.scheduled`, `post.published`, `post.failed`, `post.approved`,
-    /// `post.rejected`). The response includes the signing `secret`; save
-    /// it, it is only shown once.
+    /// `post.rejected`, `ad.status_changed`). The response includes the
+    /// signing `secret`; save it, it is only shown once. An
+    /// `ad.status_changed` delivery carries the campaign in `data`
+    /// (`campaign_id`, `workspace_id`, `name`, `platform`, `campaign_type`,
+    /// `status`, `previous_status`, `external_campaign_id`, `budget`), not a
+    /// post.
     pub async fn create(&self, params: CreateWebhookParams) -> Result<Value, Error> {
         self.client.post_json("/webhooks", &params).await
     }
