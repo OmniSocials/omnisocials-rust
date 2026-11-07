@@ -3,6 +3,7 @@
 
 mod accounts;
 mod ads;
+mod ads_parity;
 mod analytics;
 mod approval_workflows;
 mod audio;
@@ -21,6 +22,11 @@ mod webhooks;
 
 pub use accounts::Accounts;
 pub use ads::{AdDrafts, Ads};
+pub use ads_parity::{
+    AdAccounts, AdAudiences, AdBudgetSchedules, AdCampaignAds, AdComments, AdConversions, AdGoogle,
+    AdInsights, AdLeadForms, AdLeads, AdMedia, AdObjects, AdPartnership, AdPreviews,
+    AdReachFrequency, AdReports, AdResults, AdRules, AdStudies, AdTargeting,
+};
 pub use analytics::Analytics;
 pub use approval_workflows::ApprovalWorkflows;
 pub use audio::Audio;

@@ -71,7 +71,10 @@ impl Media<'_> {
 
     /// `POST /media/upload-from-url` - the server fetches a public URL
     /// (files up to 1GB; large videos finish processing in the background
-    /// and come back with status `"processing"`).
+    /// and come back with status `"processing"`). A file over 100 MB that
+    /// could not be queued for processing answers
+    /// `503 processing_unavailable`: send the same request again in a
+    /// minute.
     pub async fn upload_from_url(&self, params: UploadMediaFromUrlParams) -> Result<Value, Error> {
         self.client.post_json("/media/upload-from-url", &params).await
     }

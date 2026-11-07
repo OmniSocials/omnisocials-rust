@@ -11,8 +11,14 @@ pub struct Accounts<'a> {
 
 impl Accounts<'_> {
     /// `GET /accounts` - the workspace's connected social accounts. Each
-    /// account carries a `status` that flips to `"needs_reconnect"` when the
-    /// platform has revoked or expired its OAuth token.
+    /// account carries a `status`: `"active"`, `"needs_reconnect"` when the
+    /// platform has revoked or expired its OAuth token (Bluesky: the sign-in
+    /// could not be renewed), or `"pick_pending"` (Facebook, OmniSocials
+    /// Connect customers only: the Facebook login manages several Pages and
+    /// none is chosen yet; posts fail until the Page is chosen by connecting
+    /// Facebook again and picking the Page). The booleans `needs_reconnect` and `pick_pending`
+    /// mirror it. When `pick_pending` is `true`, `username`, `display_name`
+    /// and `profile_picture` name the person who signed in, not a Page.
     pub async fn list(&self) -> Result<Value, Error> {
         self.client.get("/accounts", Vec::new()).await
     }

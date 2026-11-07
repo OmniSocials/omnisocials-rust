@@ -50,6 +50,20 @@ fn valid_signature_passes_and_returns_parsed_event() {
 }
 
 #[test]
+fn previous_header_verifies_with_the_old_secret() {
+    // For 24 hours after a secret rotation a delivery also carries
+    // X-OmniSocials-Signature-Previous: the same scheme, signed with the OLD
+    // secret. The new secret fails on it; the old secret verifies it.
+    let old_secret = "whsec_test_old_secret";
+    let previous = sign(old_secret, now(), PAYLOAD);
+
+    assert!(verify_signature(PAYLOAD.as_bytes(), &previous, SECRET, DEFAULT_TOLERANCE_SECS).is_err());
+    let event =
+        verify_signature(PAYLOAD.as_bytes(), &previous, old_secret, DEFAULT_TOLERANCE_SECS).unwrap();
+    assert_eq!(event["id"], "evt_1");
+}
+
+#[test]
 fn rejected_event_keeps_its_approval_object() {
     let payload = r#"{"id":"evt_2","type":"post.rejected","created_at":"2026-10-02T09:00:05.000Z","data":{"post_id":"123456","workspace_id":789,"status":"rejected","post_type":"Post","scheduled_at":"2026-10-03T14:00:00.000Z","published_at":null,"targets":[],"approval":{"status":"rejected","decided_by":"c4a09e1d","reason":"Wrong product photo"}}}"#;
     let header = sign(SECRET, now(), payload);

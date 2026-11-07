@@ -4,6 +4,12 @@
 //! header of the form `t=<unix>,v1=<hex>`, where the hex value is an
 //! HMAC-SHA256 of `"{timestamp}.{rawBody}"` keyed with the webhook's signing
 //! secret (returned once on create / rotate-secret).
+//!
+//! For 24 hours after a secret rotation, deliveries also carry
+//! `X-OmniSocials-Signature-Previous`: the same format, timestamp and body,
+//! signed with the old secret. To keep accepting deliveries while you switch
+//! secrets, verify `X-OmniSocials-Signature` with the new secret and, when
+//! that fails, `X-OmniSocials-Signature-Previous` with the old one.
 
 use hmac::{Hmac, Mac};
 use serde_json::Value;
@@ -21,7 +27,9 @@ pub const DEFAULT_TOLERANCE_SECS: u64 = 300;
 /// * `payload` is the RAW request body, exactly as received. Do not parse and
 ///   re-serialize it first: the signature is computed over the raw bytes.
 /// * `signature` is the `X-OmniSocials-Signature` header value
-///   (`t=<unix>,v1=<hex>`).
+///   (`t=<unix>,v1=<hex>`). For 24 hours after a secret rotation, pass the
+///   `X-OmniSocials-Signature-Previous` value with the old secret when the
+///   new secret does not match.
 /// * `secret` is the webhook's signing secret.
 /// * `tolerance_secs` is the max allowed age of the timestamp in seconds
 ///   (replay protection). Use [`DEFAULT_TOLERANCE_SECS`] (300) unless you

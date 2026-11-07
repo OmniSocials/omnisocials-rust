@@ -430,6 +430,7 @@ fn ad_draft_params_serialize() {
                 platform: "linkedin".into(),
                 budget_amount: Some(15.0),
                 ad_account_id: Some("12".into()),
+                settings: None,
             },
         ],
         budget: AdBudget { amount: 10.0, currency: "EUR".into(), ..Default::default() },
@@ -516,4 +517,35 @@ fn ad_money_params_serialize() {
     })
     .unwrap();
     assert_eq!(renamed, json!({"name": "Spring"}));
+}
+
+#[test]
+fn ad_parity_fields_serialize() {
+    // A network's settings and its own targeting on a draft (2026-11-05).
+    let draft = serde_json::to_value(AdDraftParams {
+        objective: "lead_generation".into(),
+        platforms: vec![AdDraftPlatform::Detailed {
+            platform: "meta".into(),
+            budget_amount: None,
+            ad_account_id: None,
+            settings: Some(json!({"lead_form_id": "lf-9", "meta": {"budget_level": "campaign"}})),
+        }],
+        budget: AdBudget { amount: 10.0, currency: "EUR".into(), ..Default::default() },
+        targeting: AdDraftTargeting {
+            countries: vec!["NL".into()],
+            networks: Some(json!({"meta": {"include": {"interest": [{"id": "6003", "name": "Yoga"}]}}})),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(draft["platforms"][0], json!({"platform": "meta", "settings": {"lead_form_id": "lf-9", "meta": {"budget_level": "campaign"}}}));
+    assert_eq!(draft["targeting"]["networks"]["meta"]["include"]["interest"][0]["id"], "6003");
+
+    let update = serde_json::to_value(UpdateAdCampaignParams {
+        settings: Some(json!({"optimization": {"bidding": {"strategy": "cost_cap", "amount": 4.5}}})),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(update, json!({"settings": {"optimization": {"bidding": {"strategy": "cost_cap", "amount": 4.5}}}}));
 }

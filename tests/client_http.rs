@@ -7,9 +7,10 @@ use std::net::TcpListener;
 use std::thread::JoinHandle;
 
 use omnisocials::{
-    AdBudget, AdDraftAd, AdDraftParams, AdDraftSchedule, AdDraftTargeting, AdMediaFile, Client,
-    CreatePostParams, Error, LaunchAdDraftParams, ListPinterestProductsParams, ListPostsParams,
-    SearchLocationsParams, UpdateAdCampaignParams,
+    AdBudget, AdDraftAd, AdDraftParams, AdDraftSchedule, AdDraftTargeting, AdMediaFile,
+    ApprovePostParams, Client, CreatePostParams, Error, LaunchAdDraftParams,
+    ListPinterestProductsParams, ListPostsParams, RejectPostParams, SearchLocationsParams,
+    UpdateAdCampaignParams,
 };
 
 // ─── Stub server ─────────────────────────────────────────────────────────────
@@ -163,6 +164,79 @@ async fn posts_get_approval_reads_the_review() {
 
     let captured = handle.join().unwrap();
     assert!(captured[0].starts_with("GET /posts/123456/approval HTTP/1.1"), "{}", captured[0]);
+}
+
+#[tokio::test]
+async fn posts_approve_and_reject_send_step_order_only_when_given() {
+    let ok = r#"{"data":{"id":"1024","status":"in_approval","approval_status":"pending"}}"#;
+    let (base_url, handle) =
+        spawn_stub((0..7).map(|_| http_response(200, "OK", &[], ok)).collect());
+
+    let client = client_for(&base_url, 0);
+    let posts = client.posts();
+    posts.approve("1024").await.unwrap();
+    posts
+        .approve_with("1024", ApprovePostParams { step_order: Some(2) })
+        .await
+        .unwrap();
+    posts.approve_with("1024", ApprovePostParams::default()).await.unwrap();
+    posts.reject("1024", None).await.unwrap();
+    posts.reject("1024", Some("Wrong CTA link")).await.unwrap();
+    posts
+        .reject_with(
+            "1024",
+            RejectPostParams {
+                comment: Some("Wrong CTA link".into()),
+                step_order: Some(2),
+            },
+        )
+        .await
+        .unwrap();
+    posts
+        .reject_with("1024", RejectPostParams { step_order: Some(3), ..Default::default() })
+        .await
+        .unwrap();
+
+    let captured = handle.join().unwrap();
+    let body_text = |raw: &str| raw[raw.find("\r\n\r\n").unwrap() + 4..].to_string();
+    assert_eq!(request_line(&captured[0]), "POST /posts/1024/approve HTTP/1.1");
+    assert_eq!(body_text(&captured[0]), "");
+    assert_eq!(request_body(&captured[1]), serde_json::json!({"step_order": 2}));
+    assert_eq!(body_text(&captured[2]), "");
+    assert_eq!(request_line(&captured[3]), "POST /posts/1024/reject HTTP/1.1");
+    assert_eq!(body_text(&captured[3]), "");
+    assert_eq!(request_body(&captured[4]), serde_json::json!({"comment": "Wrong CTA link"}));
+    assert_eq!(
+        request_body(&captured[5]),
+        serde_json::json!({"comment": "Wrong CTA link", "step_order": 2})
+    );
+    assert_eq!(request_body(&captured[6]), serde_json::json!({"step_order": 3}));
+}
+
+#[tokio::test]
+async fn posts_approve_step_changed_keeps_current_step_order() {
+    let (base_url, handle) = spawn_stub(vec![http_response(
+        409,
+        "Conflict",
+        &[],
+        r#"{"error":{"code":"step_changed","message":"The review is on step 2 now.","current_step_order":2}}"#,
+    )]);
+
+    let client = client_for(&base_url, 0);
+    let err = client
+        .posts()
+        .approve_with("1024", ApprovePostParams { step_order: Some(1) })
+        .await
+        .unwrap_err();
+    handle.join().unwrap();
+    match err {
+        Error::Api { status, code, body, .. } => {
+            assert_eq!(status, 409);
+            assert_eq!(code.as_deref(), Some("step_changed"));
+            assert_eq!(body.unwrap()["error"]["current_step_order"], 2);
+        }
+        other => panic!("expected Error::Api, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -666,6 +740,160 @@ async fn ads_list_builds_the_query_and_encodes_ids() {
         "GET /ads/campaigns?status=active&campaign_type=boost&limit=10 HTTP/1.1"
     );
     assert_eq!(request_line(&captured[1]), "DELETE /ads/drafts/g%201%2Fx HTTP/1.1");
+}
+
+// ─── Ads API parity (2026-11-05) ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn ads_parity_calls_send_the_right_requests() {
+    let ok = || http_response(200, "OK", &[], r#"{"data":{}}"#);
+    let (base_url, handle) = spawn_stub((0..24).map(|_| ok()).collect());
+    let client = client_for(&base_url, 0);
+    let ads = client.ads();
+    let none = serde_json::Value::Null;
+
+    ads.objects()
+        .tree("12", serde_json::json!({"from": "2026-10-01", "status": ["active", "paused"], "limit": 50}))
+        .await
+        .unwrap();
+    ads.objects().get("12", "ad_set", "23851/1").await.unwrap();
+    ads.objects().set_status("12", "ad", "9", "paused", None).await.unwrap();
+    ads.objects().set_status("12", "campaign", "238", "active", Some(25.0)).await.unwrap();
+    ads.objects().start_import("12").await.unwrap();
+    ads.bulk_status(&["7", "8"], "active", Some(10.0)).await.unwrap();
+    ads.campaign_ads().add("7", serde_json::json!([{"primary_text": "Hi", "link": "https://example.com"}])).await.unwrap();
+    ads.campaign_ads().set_status("7", "41", "active", Some(10.0)).await.unwrap();
+    ads.previews().for_ad("7", "41", &["feed", "story"]).await.unwrap();
+    ads.targeting()
+        .search(serde_json::json!({"ad_account_id": 12, "type": "interest", "q": "yoga"}))
+        .await
+        .unwrap();
+    ads.audiences().get("aud 1", "12").await.unwrap();
+    ads.audiences()
+        .remove_members("aud-1", serde_json::json!({"ad_account_id": 12, "schema": ["email"], "rows": [["a@example.com"]]}))
+        .await
+        .unwrap();
+    ads.lead_forms().send_test_lead("5", ()).await.unwrap();
+    ads.insights().campaign("7", serde_json::json!({"breakdown": "ad", "metrics": ["spend", "clicks"]})).await.unwrap();
+    ads.rules().undo("3", Some(20.0)).await.unwrap();
+    ads.rules().preview_saved("4").await.unwrap();
+    ads.results().put_metric("revenue", serde_json::json!({"label": "Revenue"})).await.unwrap();
+    ads.media().delete("abc", serde_json::json!({"ad_account_id": 12, "type": "image"})).await.unwrap();
+    ads.comments().hide("7", "41", "c:1", false).await.unwrap();
+    ads.accounts()
+        .update_settings("12", serde_json::json!({"spend_cap": null, "confirm_budget_amount": "remove"}))
+        .await
+        .unwrap();
+    ads.reach_frequency().reserve("rf1", "12", 500.0).await.unwrap();
+    ads.reach_frequency().cancel("rf1", "12").await.unwrap();
+    ads.budget_schedules().delete("7", "bs-1").await.unwrap();
+    ads.google().search_terms(serde_json::json!({"ad_account_id": 12, "limit": 20, "x": none})).await.unwrap();
+
+    let captured = handle.join().unwrap();
+    let expected: Vec<(&str, Option<serde_json::Value>)> = vec![
+        ("GET /ads/accounts/12/tree?from=2026-10-01&limit=50&status=active%2Cpaused HTTP/1.1", None),
+        ("GET /ads/accounts/12/objects/ad_set/23851%2F1 HTTP/1.1", None),
+        ("PUT /ads/accounts/12/objects/ad/9/status HTTP/1.1", Some(serde_json::json!({"status": "paused"}))),
+        ("PUT /ads/accounts/12/objects/campaign/238/status HTTP/1.1", Some(serde_json::json!({"status": "active", "confirm_budget_amount": 25.0}))),
+        ("POST /ads/accounts/12/import HTTP/1.1", None),
+        ("POST /ads/campaigns/bulk-status HTTP/1.1", Some(serde_json::json!({"campaign_ids": ["7", "8"], "status": "active", "confirm_budget_amount": 10.0}))),
+        ("POST /ads/campaigns/7/ads HTTP/1.1", Some(serde_json::json!({"ads": [{"primary_text": "Hi", "link": "https://example.com"}]}))),
+        ("PUT /ads/campaigns/7/ads/41/status HTTP/1.1", Some(serde_json::json!({"status": "active", "confirm_budget_amount": 10.0}))),
+        ("GET /ads/campaigns/7/ads/41/previews?placements=feed%2Cstory HTTP/1.1", None),
+        ("GET /ads/targeting/search?ad_account_id=12&q=yoga&type=interest HTTP/1.1", None),
+        ("GET /ads/audiences/aud%201?ad_account_id=12 HTTP/1.1", None),
+        ("DELETE /ads/audiences/aud-1/members HTTP/1.1", Some(serde_json::json!({"ad_account_id": 12, "schema": ["email"], "rows": [["a@example.com"]]}))),
+        ("POST /ads/lead-forms/5/test-leads HTTP/1.1", None),
+        ("GET /ads/campaigns/7/analytics?breakdown=ad&metrics=spend%2Cclicks HTTP/1.1", None),
+        ("POST /ads/rules/activity/3/undo HTTP/1.1", Some(serde_json::json!({"confirm_budget_amount": 20.0}))),
+        ("POST /ads/rules/4/preview HTTP/1.1", None),
+        ("PUT /ads/campaign-results/metrics/revenue HTTP/1.1", Some(serde_json::json!({"label": "Revenue"}))),
+        ("DELETE /ads/media/abc?ad_account_id=12&type=image HTTP/1.1", None),
+        ("POST /ads/campaigns/7/ads/41/comments/c%3A1/hide HTTP/1.1", Some(serde_json::json!({"hidden": false}))),
+        ("PATCH /ads/accounts/12/settings HTTP/1.1", Some(serde_json::json!({"spend_cap": null, "confirm_budget_amount": "remove"}))),
+        ("POST /ads/reach-frequency/rf1/reserve HTTP/1.1", Some(serde_json::json!({"ad_account_id": "12", "confirm_budget_amount": 500.0}))),
+        ("DELETE /ads/reach-frequency/rf1?ad_account_id=12 HTTP/1.1", None),
+        ("DELETE /ads/campaigns/7/budget-schedules/bs-1 HTTP/1.1", None),
+        ("GET /ads/google/search-terms?ad_account_id=12&limit=20 HTTP/1.1", None),
+    ];
+    assert_eq!(captured.len(), expected.len());
+    for (raw, (line, body)) in captured.iter().zip(expected.iter()) {
+        assert_eq!(request_line(raw), *line);
+        match body {
+            Some(body) => assert_eq!(&request_body(raw), body, "{line}"),
+            None => assert!(raw.ends_with("\r\n\r\n"), "{line} sends no body: {raw}"),
+        }
+    }
+}
+
+// Each stub below holds one more answer than the money call should use: a
+// retry would take it and succeed, so the follow-up health check proves
+// there was none.
+#[tokio::test]
+async fn ads_parity_money_calls_are_not_retried_after_a_502() {
+    let bad_gateway = || {
+        http_response(502, "Bad Gateway", &[("Retry-After", "0")], r#"{"error":{"code":"bad_gateway","message":"upstream"}}"#)
+    };
+    let healthy = || http_response(200, "OK", &[], r#"{"status":"ok"}"#);
+    let (base_url, handle) = spawn_stub((0..10).flat_map(|_| [bad_gateway(), healthy()]).collect());
+    let client = client_for(&base_url, 2);
+    let ads = client.ads();
+
+    assert!(ads.objects().update("12", "campaign", "238", serde_json::json!({"confirm_budget_amount": 30})).await.is_err());
+    client.health().await.unwrap();
+    assert!(ads.objects().set_status("12", "campaign", "238", "active", Some(25.0)).await.is_err());
+    client.health().await.unwrap();
+    assert!(ads.bulk_status(&["7", "8"], "active", Some(10.0)).await.is_err());
+    client.health().await.unwrap();
+    assert!(ads.campaign_ads().set_status("7", "41", "active", Some(10.0)).await.is_err());
+    client.health().await.unwrap();
+    assert!(ads.rules().create(serde_json::json!({"name": "Raise", "confirm_max_daily_budget": 50})).await.is_err());
+    client.health().await.unwrap();
+    assert!(ads.rules().update("4", serde_json::json!({"enabled": true})).await.is_err());
+    client.health().await.unwrap();
+    assert!(ads.rules().undo("3", Some(20.0)).await.is_err());
+    client.health().await.unwrap();
+    assert!(ads.accounts().update_settings("12", serde_json::json!({"spend_cap": 900, "confirm_budget_amount": 900})).await.is_err());
+    client.health().await.unwrap();
+    assert!(ads.reach_frequency().reserve("rf1", "12", 500.0).await.is_err());
+    client.health().await.unwrap();
+    let err = ads.budget_schedules().create("7", serde_json::json!({"confirm_budget_amount": 20})).await.unwrap_err();
+    assert!(matches!(err, Error::Server { status: 502, .. }), "{err:?}");
+    client.health().await.unwrap();
+
+    let lines: Vec<String> = handle.join().unwrap().iter().map(|raw| request_line(raw).to_owned()).collect();
+    let money: Vec<&str> = lines.iter().step_by(2).map(String::as_str).collect();
+    assert_eq!(
+        money,
+        vec![
+            "PATCH /ads/accounts/12/objects/campaign/238 HTTP/1.1",
+            "PUT /ads/accounts/12/objects/campaign/238/status HTTP/1.1",
+            "POST /ads/campaigns/bulk-status HTTP/1.1",
+            "PUT /ads/campaigns/7/ads/41/status HTTP/1.1",
+            "POST /ads/rules HTTP/1.1",
+            "PATCH /ads/rules/4 HTTP/1.1",
+            "POST /ads/rules/activity/3/undo HTTP/1.1",
+            "PATCH /ads/accounts/12/settings HTTP/1.1",
+            "POST /ads/reach-frequency/rf1/reserve HTTP/1.1",
+            "POST /ads/campaigns/7/budget-schedules HTTP/1.1",
+        ]
+    );
+    assert!(lines.iter().skip(1).step_by(2).all(|line| line == "GET /health HTTP/1.1"));
+}
+
+#[tokio::test]
+async fn ads_parity_read_is_retried_after_a_502() {
+    let (base_url, handle) = spawn_stub(vec![
+        http_response(502, "Bad Gateway", &[("Retry-After", "0")], r#"{"error":{"code":"bad_gateway","message":"upstream"}}"#),
+        http_response(200, "OK", &[], r#"{"data":{"campaigns":[],"next_cursor":null}}"#),
+    ]);
+    let client = client_for(&base_url, 1);
+
+    let tree = client.ads().objects().tree("12", ()).await.unwrap();
+    assert!(tree["data"]["campaigns"].as_array().unwrap().is_empty());
+    let captured = handle.join().unwrap();
+    assert_eq!(captured.len(), 2);
+    assert_eq!(request_line(&captured[1]), "GET /ads/accounts/12/tree HTTP/1.1");
 }
 
 // ─── Env fallback + builder precedence ───────────────────────────────────────

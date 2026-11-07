@@ -12,12 +12,20 @@ pub struct Webhooks<'a> {
 }
 
 impl Webhooks<'_> {
-    /// `GET /webhooks` - list the workspace's webhook endpoints.
+    /// `GET /webhooks` - list the webhooks of the key's workspace and the
+    /// organisation-wide webhooks of its organisation. Every webhook carries
+    /// `workspace_id`: `null` for an organisation-wide webhook (made in the
+    /// OmniSocials dashboard), which receives the events of every workspace
+    /// of the organisation. A webhook whose creator lost access to the
+    /// organisation or workspace is switched off
+    /// automatically: `is_active` is `false` and `last_failure.error` says
+    /// why.
     pub async fn list(&self) -> Result<Value, Error> {
         self.client.get("/webhooks", Vec::new()).await
     }
 
-    /// `GET /webhooks/:id` - fetch a single webhook.
+    /// `GET /webhooks/:id` - fetch a webhook of the key's workspace, or an
+    /// organisation-wide webhook of its organisation (`workspace_id` `null`).
     pub async fn get(&self, id: &str) -> Result<Value, Error> {
         self.client
             .get(&format!("/webhooks/{}", encode_path_segment(id)), Vec::new())
@@ -26,24 +34,36 @@ impl Webhooks<'_> {
 
     /// `POST /webhooks` - register an endpoint for event deliveries
     /// (`post.scheduled`, `post.published`, `post.failed`, `post.approved`,
-    /// `post.rejected`, `ad.status_changed`). The response includes the
-    /// signing `secret`; save it, it is only shown once. An
-    /// `ad.status_changed` delivery carries the campaign in `data`
-    /// (`campaign_id`, `workspace_id`, `name`, `platform`, `campaign_type`,
-    /// `status`, `previous_status`, `external_campaign_id`, `budget`), not a
-    /// post.
+    /// `post.rejected`, and for ads `ad.status_changed`, `ad.created`,
+    /// `ad.updated`, `ad.review`, `ad.delivery_issue`, `campaign.created`,
+    /// `campaign.updated`, `campaign.budget`, `lead.received`,
+    /// `ads.sync_failed`, `ads.sync_recovered`, `ads.initial_sync_completed`,
+    /// `ad_rule.triggered`). The response includes the signing `secret`;
+    /// save it, it is only shown once. An `ad.status_changed` delivery
+    /// carries the campaign in `data` (`campaign_id`, `workspace_id`, `name`,
+    /// `platform`, `campaign_type`, `status`, `previous_status`,
+    /// `external_campaign_id`, `budget`), not a post; the other campaign
+    /// events carry the campaign plus `details`, the rest their own `data`.
+    /// Subscribing to any ads event needs the `ads:read` scope on the key
+    /// and `access_ads` for its person (`403 insufficient_scope` /
+    /// `insufficient_permission`).
     pub async fn create(&self, params: CreateWebhookParams) -> Result<Value, Error> {
         self.client.post_json("/webhooks", &params).await
     }
 
     /// `PATCH /webhooks/:id` - change the URL, events, or active state.
+    /// Works on organisation-wide webhooks too. `is_active: Some(true)`
+    /// switches on a webhook that was switched off (also an automatic
+    /// switch-off); setting `url`, `events` or switching it on makes the
+    /// key's creator the person behind the webhook.
     pub async fn update(&self, id: &str, params: UpdateWebhookParams) -> Result<Value, Error> {
         self.client
             .patch_json(&format!("/webhooks/{}", encode_path_segment(id)), &params)
             .await
     }
 
-    /// `DELETE /webhooks/:id` - delete a webhook. Resolves to
+    /// `DELETE /webhooks/:id` - delete a webhook of the key's workspace or an
+    /// organisation-wide webhook of its organisation. Resolves to
     /// [`Value::Null`] (204).
     pub async fn delete(&self, id: &str) -> Result<Value, Error> {
         self.client
@@ -52,8 +72,15 @@ impl Webhooks<'_> {
     }
 
     /// `POST /webhooks/:id/rotate-secret` - generate a new signing secret.
-    /// Save the returned secret; it is only shown once and the old one stops
-    /// working immediately.
+    /// Save the returned secret; it is only shown once. The old secret keeps
+    /// signing for 24 hours: every delivery then carries
+    /// `X-OmniSocials-Signature` (new secret) and
+    /// `X-OmniSocials-Signature-Previous` (old secret, same format, same
+    /// timestamp and body). Verify the first with the new secret and, when
+    /// that fails, the second with the old one (see
+    /// [`crate::webhooks::verify_signature`]). Rotating again within the 24
+    /// hours replaces the previous secret with the one just rotated out.
+    /// Works on organisation-wide webhooks too.
     pub async fn rotate_secret(&self, id: &str) -> Result<Value, Error> {
         self.client
             .post_empty(&format!("/webhooks/{}/rotate-secret", encode_path_segment(id)))

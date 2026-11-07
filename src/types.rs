@@ -538,6 +538,31 @@ pub struct ListPostsParams {
     pub tag: Option<String>,
 }
 
+/// Body for `POST /posts/:id/approve`
+/// (see [`crate::resources::Posts::approve_with`]).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApprovePostParams {
+    /// The workflow step you reviewed: `current_step` of
+    /// [`crate::resources::Posts::get_approval`]. When the review is on
+    /// another step now, nothing is approved and the answer is `409
+    /// step_changed` with `error.current_step_order`. A whole number from 1,
+    /// else `400 validation_error`. `None` acts on whatever step is current.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_order: Option<u32>,
+}
+
+/// Body for `POST /posts/:id/reject`
+/// (see [`crate::resources::Posts::reject_with`]).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RejectPostParams {
+    /// Reason shown in the post's review thread (max 2000 characters).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    /// The workflow step you reviewed, as on [`ApprovePostParams`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_order: Option<u32>,
+}
+
 /// Query for `GET /posts/recent-platform`.
 #[derive(Debug, Clone, Default)]
 pub struct RecentPlatformPostsParams {
@@ -971,12 +996,19 @@ pub struct UpdateAutomationParams {
 
 // ─── Ads ─────────────────────────────────────────────────────────────────────
 //
-// Ads spend real money once a campaign starts. Boosts, campaigns and drafts
-// are created as drafts (no spend); `activate`, `activate_multi`,
-// `drafts().launch` and a budget raise through `update` start or raise spend,
-// and each needs the amount again as a confirmation. Budgets are in MAJOR
-// currency units (10 = 10 EUR) in the ad account's currency. Ids are strings,
-// like every other id in this crate; the API reads `"42"` and `42` the same.
+// Ads spend real money once a campaign starts. Boosts and drafts are created
+// as drafts (no spend). Starting or raising spend needs a key with the opt-in
+// `ads:spend` scope ("Start ads", a second switch under "Ads"; its creator
+// needs `manage_ads`): `activate`, `activate_multi`, `resume`,
+// `drafts().launch`, a budget raise or any change of a campaign that reached
+// the network through `update`, and the parity calls that switch something
+// on or raise a budget. Each repeats the amount. Without `ads:spend` these
+// calls answer `403 start_in_app` with the page in the app where a person
+// does it; on Google (`api_draft_only`) they always do, also with
+// `ads:spend`. Pause and delete stay open, except on the networks in
+// `api_stop_in_app` (Google). Budgets are in MAJOR currency units (10 = 10
+// EUR) in the ad account's currency. Ids are strings, like every other id in
+// this crate; the API reads `"42"` and `42` the same.
 
 /// Query for `GET /ads/campaigns`
 /// (see [`crate::resources::Ads::list`]). Every field is optional.
@@ -1080,46 +1112,49 @@ pub struct BoostPostMultiParams {
     pub name: Option<String>,
 }
 
-/// Body for `POST /ads/campaigns` (see [`crate::resources::Ads::create`]).
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct CreateAdCampaignParams {
-    /// OmniSocials ad account id.
-    pub ad_account_id: String,
-    /// Campaign name.
-    pub name: String,
-    /// The budget.
-    pub budget: AdBudget,
-    /// See [`BoostPostParams::objective`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub objective: Option<String>,
-    /// Unified targeting.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub targeting: Option<Value>,
-    /// When the campaign runs.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub schedule: Option<AdSchedule>,
-}
-
 /// Body for `PATCH /ads/campaigns/:id` (see
-/// [`crate::resources::Ads::update`]). Every field is optional.
+/// [`crate::resources::Ads::update`]). Every field is optional. A draft
+/// changes with `ads:write`. A campaign that reached the network changes
+/// only with a key that has `ads:spend` (never on Google); without it the
+/// call answers `403 start_in_app`.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct UpdateAdCampaignParams {
     /// New name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// A new goal, only on a draft: `"traffic"`, `"engagement"`,
+    /// `"awareness"`, `"video_views"`, or through the API only
+    /// `"lead_generation"`, `"conversions"`, `"messages"` or `"calls"`
+    /// (`capabilities` says per network what each `needs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub objective: Option<String>,
     /// New budget.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget: Option<AdBudget>,
-    /// Required to RAISE the budget of a running campaign: the new amount
-    /// again, after the person agreed to it.
+    /// Required to RAISE the budget of a running campaign (a key with
+    /// `ads:spend`, outside `api_draft_only`): the new amount again, after
+    /// the person agreed to it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confirm_budget_amount: Option<f64>,
-    /// New targeting.
+    /// New targeting: unified targeting (`countries`, ages, genders) plus
+    /// `network`, the network's own targeting (it may change after the start
+    /// too): `json!({"countries": ["NL"], "network": {"include":
+    /// {"interest": [{"id": "6003", "name": "Yoga"}]}, "exclude": {},
+    /// "audiences": {"include": [], "exclude": []}}})`, ids from
+    /// `ads().targeting().search`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub targeting: Option<Value>,
     /// New schedule.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schedule: Option<AdSchedule>,
+    /// New settings, only on a campaign that never started (after the start
+    /// `400 settings_locked`: make a copy with
+    /// [`crate::resources::Ads::duplicate`]): `optimization` (`conversion`,
+    /// `bidding`, `attribution`), `messaging`, `calls`, `lead_form_id`,
+    /// `google` (`kind`, `search`, `performance_max`) and `meta`
+    /// (`budget_level`). `capabilities` lists the keys per network.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<Value>,
 }
 
 /// Body for `POST /ads/research/keywords` (see
@@ -1182,6 +1217,11 @@ pub enum AdDraftPlatform {
         /// The ad account on this network.
         #[serde(skip_serializing_if = "Option::is_none")]
         ad_account_id: Option<String>,
+        /// The settings of this network (see
+        /// [`UpdateAdCampaignParams::settings`]); `None` keeps the stored
+        /// settings on an update.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        settings: Option<Value>,
     },
 }
 
@@ -1238,6 +1278,13 @@ pub struct AdDraftTargeting {
     /// Meta's verified payer per regional category.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regional_identities: Option<Value>,
+    /// The network's own targeting per network key, e.g. `json!({"meta":
+    /// {"include": {"interest": [{"id": "6003", "name": "Yoga"}]},
+    /// "audiences": {"exclude": [{"id": "aud-1"}]}}})`, ids from
+    /// `ads().targeting().search`. `location` entries replace `countries` on
+    /// that network. `None` keeps each network's stored targeting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub networks: Option<Value>,
 }
 
 /// One picture or video of a draft ad.
@@ -1304,7 +1351,12 @@ pub struct AdDraftAd {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub overrides: Option<Value>,
     /// Network-only fields, e.g. `json!({"google": {"business_name": "...",
-    /// "logo": {"url": "..."}}})`.
+    /// "logo": {"url": "..."}}})`. Meta: `lead_form_id`, `primary_texts`,
+    /// `headlines`, `creative_features`, `media_ref`, `partnership`; TikTok:
+    /// `spark_auth_code`, `lead_form_id`, `media_ref`; LinkedIn and
+    /// Pinterest: `lead_form_id`; X: `media_ref`; Google: `business_name`,
+    /// `logo`, `responsive_search_ad` (`capabilities` lists them as
+    /// `ad_fields`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub network: Option<Value>,
     /// Extra files per placement (Meta Stories and Reels).
@@ -1319,7 +1371,11 @@ pub struct AdDraftParams {
     /// Draft name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// `"traffic"`, `"engagement"`, `"awareness"` or `"video_views"`.
+    /// `"traffic"`, `"engagement"`, `"awareness"` or `"video_views"`, or
+    /// through the API only `"lead_generation"`, `"conversions"`,
+    /// `"messages"` or `"calls"` (`capabilities` says per network what each
+    /// `needs`: a lead form, a conversion, messaging or a phone number in
+    /// the network's `settings`).
     pub objective: String,
     /// The networks: `vec!["meta".into(), "linkedin".into()]`, or
     /// [`AdDraftPlatform::Detailed`] entries for a daily amount or an ad
@@ -1350,7 +1406,10 @@ pub struct AttachAdDraftAccountParams {
 /// [`crate::resources::AdDrafts::launch`]). Give `confirm_budget_amount`
 /// (one daily amount for every network) or `confirm_budget_amounts` (per
 /// campaign id). Each must equal that campaign's daily amount, else
-/// `400 budget_confirmation_required` and nothing is written.
+/// `400 budget_confirmation_required` and nothing is written. Needs a key
+/// with `ads:spend`: without it the call answers `403 start_in_app` with the
+/// draft's page. A network in `api_draft_only` (Google) is skipped with code
+/// `start_in_app`.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct LaunchAdDraftParams {
     /// The daily amount of every network, as the person confirmed it.
@@ -1469,7 +1528,13 @@ pub struct CreateWebhookParams {
     pub url: String,
     /// Events to subscribe to: `post.scheduled`, `post.published`,
     /// `post.failed`, `post.approved`, `post.rejected`, `ad.status_changed`
-    /// (its `data` is the campaign, not a post).
+    /// (its `data` is the campaign, not a post), `ad.created`, `ad.updated`,
+    /// `ad.review`, `ad.delivery_issue`, `campaign.created`,
+    /// `campaign.updated`, `campaign.budget`, `lead.received`,
+    /// `ads.sync_failed`, `ads.sync_recovered`,
+    /// `ads.initial_sync_completed`, `ad_rule.triggered`. Any ads event needs
+    /// the `ads:read` scope on the key and `access_ads` for its person, else
+    /// `403 insufficient_scope` / `insufficient_permission`.
     pub events: Vec<String>,
 }
 

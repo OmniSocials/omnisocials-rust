@@ -403,14 +403,42 @@ client.posts().delete(id).await?;       // resolves to Value::Null (204)
 
 `retry` re-publishes only the platforms that failed, on the same post; platforms that already succeeded are never posted again. It is asynchronous: a 200 means the retry is queued, so poll `get` for the outcome. Max 3 retries per platform.
 
+These calls return `Error::Api` (status 409) and change nothing when the post is not in a state for them:
+
+- `post_publishing`: `update` or `delete` while the post is publishing (status `posting`) or a retry publishes one of its channels. Poll `get` until the status is `published`, `warning` or `failed`. An `update` with only `tags` still works.
+- `review_required`: changes were requested on the post (`approval_status` `rejected`), so `publish`, or an `update` that would schedule it, is refused. It needs a new review: create it again with `approval_workflow_id`. Saving it as a draft works.
+- `retry_in_progress`: `retry` while another retry of the post runs.
+- `media_processing`: a media id in `create`, `create_and_publish` or `update` is still processing. Wait until `client.media().get(id)` says `ready`, then send the same request again. A file whose processing failed answers `400 invalid_media`: upload it again.
+
 ### Approve or reject a post
 
 ```rust
-client.posts().approve(id).await?;                                    // approve the current approval-workflow step
-client.posts().reject(id, Some("Wrong CTA link, please fix.")).await?; // reject and stop the workflow (pass None for no comment)
+use omnisocials::{ApprovePostParams, Error, RejectPostParams};
+
+// Read the step you review first, then name it on the decision.
+let review = client.posts().get_approval(id).await?;
+let step_order = review["data"]["current_step"].as_u64().map(|step| step as u32);
+
+match client.posts().approve_with(id, ApprovePostParams { step_order }).await {
+    Ok(_) => println!("approved"),
+    Err(Error::Api { code: Some(code), body, .. }) if code == "step_changed" => {
+        // Somebody decided since you read it: nothing was decided. Read the approval again.
+        let now = body.map(|b| b["error"]["current_step_order"].clone());
+        println!("the review is on step {now:?}");
+    }
+    Err(err) => return Err(err),
+}
+
+// Or reject and stop the workflow (comment optional):
+// client.posts().reject_with(id, RejectPostParams {
+//     comment: Some("Wrong CTA link, please fix.".into()),
+//     step_order,
+// }).await?;
 ```
 
-Only works on a post with `approval_status: "pending"` (`status: "in_approval"`). Both act on behalf of the user who owns the API key, who must be a listed approver for the workflow's CURRENT step — steps approve in order, so being an approver on a later step is not enough yet (returns `Error::Api` with code `forbidden`). Approving the last step finalizes the post (`scheduled` or `posting`); rejecting stops the whole workflow immediately, not just the current step.
+Only works on a post with `approval_status: "pending"` (`status: "in_approval"`). Both act on behalf of the user who owns the API key, who must be a listed approver for the workflow's CURRENT step. Steps approve in order, so being an approver on a later step is not enough yet (returns `Error::Api` with code `forbidden`). Approving the last step finalizes the post (`scheduled` or `posting`); rejecting stops the whole workflow immediately, not just the current step.
+
+`step_order` is optional: the `current_step` of `get_approval`. When the review is on another step now (somebody decided since you read it, or a retried call already went through), nothing is decided and the call returns `Error::Api` (status 409) with code `step_changed` and `error.current_step_order` in its `body`, the step the review is on now. Without it the call acts on whatever step is current, so a retry after a timeout could approve the next step too. `approve(id)` and `reject(id, comment)` still work and send no step.
 
 ### Read the approval review
 
@@ -456,7 +484,7 @@ let upload = client.media().upload_from_url(UploadMediaFromUrlParams {
 println!("{} {:?}", upload["data"]["id"], upload["compatibility"]);
 ```
 
-Videos over 100MB are processed in the background and come back with status `"processing"`. Every upload response includes a `compatibility` block listing connected platforms that would reject the file.
+Videos over 100MB are processed in the background and come back with status `"processing"`; when such a file cannot be queued, the call returns a 503 `processing_unavailable` error (send the same request again in a minute). Every upload response includes a `compatibility` block listing connected platforms that would reject the file.
 
 ### Upload local bytes (multipart)
 
@@ -706,6 +734,8 @@ let first_id = accounts["data"][0]["id"].as_str().unwrap();
 let one = client.accounts().get(first_id).await?;
 ```
 
+`status` is `active` or `needs_reconnect` (the token was revoked or expired; Bluesky also when its sign-in could not be renewed). Posts to a `needs_reconnect` account fail until it is reconnected in the OmniSocials app. OmniSocials Connect customer workspaces can also show `pick_pending` (Facebook, Connect customers only: no Page chosen yet).
+
 ## Analytics
 
 ```rust
@@ -938,16 +968,15 @@ Without `source` the list reads the Pinterest catalog (with `price`, `currency`,
 
 ## Ads
 
-Boost a published post or create a new ad on Meta, Pinterest, TikTok, LinkedIn, X and Google. Ads spend real money, so every call that starts or raises spend asks for the amount again: `ads().activate`, `ads().activate_multi`, `ads().drafts().launch` and a budget raise through `ads().update`. Show the person the amount first and pass it only after they agree. These calls (and `ads().resume`) are not retried after a 5xx or a connection error, because the first attempt may have started the ad: read the campaign or the draft to see what happened. A 429 is still retried.
+Boost a published post or create a new ad on Meta, Pinterest, TikTok, LinkedIn, X and Google. Boosts and new ads are drafts: your code writes the draft, and the person who pays sees the amount and starts the ad in OmniSocials from the draft's `review_url`. A key starts and raises spend itself only with the opt-in **Start ads** switch (scope `ads:spend`). Without it `ads().activate`, `ads().activate_multi`, `ads().resume`, `ads().drafts().launch`, a budget raise or any change of a campaign that reached the network through `ads().update`, and the calls of the groups below that switch something on or raise a budget answer `403 start_in_app` (`Error::PermissionDenied`), and the error message names the page where the person does it. Google (`api_draft_only` of `ads().capabilities()`) always stops at the draft, also with `ads:spend`. `ads().pause` and `ads().delete` stay open, except on the networks in `api_stop_in_app` (Google), where a campaign that reached the network also answers `403 start_in_app`. Only a paused campaign resumes (`409 not_paused`). The calls that start or raise spend repeat the amount (`confirm_budget_amount`) and are not retried after a 5xx or a connection error, only after a 429.
 
-The `ads:read` and `ads:write` scopes are opt-in: create the API key with **Ads** switched on (Settings, API). A key without them gets `Error::PermissionDenied` with code `insufficient_scope`. Ad accounts are connected and picked in the OmniSocials dashboard. Budgets are in major units (10 = 10 EUR) in the ad account's currency. Campaign and ad account ids are strings (`"12"`), as the API sends them and like every other id in this crate. A campaign carries `createdAt` and `updatedAt` in camelCase; an ad account carries `created_at`.
+The `ads:read` and `ads:write` scopes are opt-in: create the API key with **Ads** switched on (Settings, API). A key without them gets `Error::PermissionDenied` with code `insufficient_scope`. `ads:spend` is the **Start ads** switch under it, offered only to a person with `manage_ads`. Ad accounts are connected and picked in the OmniSocials dashboard. Budgets are in major units (10 = 10 EUR) in the ad account's currency: a draft whose `budget.currency` differs from the attached ad account's currency answers `400 currency_mismatch`. Ads errors may carry `param`, the field at fault: read it from the error's `body` (`body["error"]["param"]`). Campaign and ad account ids are strings (`"12"`), as the API sends them and like every other id in this crate. A campaign carries `createdAt` and `updatedAt` in camelCase; an ad account carries `created_at`. In `overview()`, `totals.spend` is `null` when the campaigns use more than one currency: read `totals_by_currency`.
 
-### Create an ad (draft, then launch)
+### Create an ad (a draft the person starts)
 
 ```rust
 use omnisocials::{
     AdBudget, AdDraftAd, AdDraftParams, AdDraftSchedule, AdDraftTargeting, AdMediaFile,
-    LaunchAdDraftParams,
 };
 
 let caps = client.ads().capabilities().await?;
@@ -979,18 +1008,12 @@ let draft = client.ads().drafts().create(AdDraftParams {
         ..Default::default()
     }],
 }).await?;
-let group_id = draft["data"]["group_id"].as_str().unwrap();
 
-// A draft spends nothing. Hand draft["data"]["review_url"] to the person, or
-// start it after they confirmed 10 EUR a day per network:
-let launch = client.ads().drafts().launch(group_id, LaunchAdDraftParams {
-    confirm_budget_amount: Some(10.0),
-    ..Default::default()
-}).await?;
-for result in launch["data"]["results"].as_array().unwrap() {
-    println!("{} {} {}", result["platform"], result["ok"], result["error"]);
-}
+// A draft spends nothing. The person checks it and starts it in OmniSocials:
+println!("Check and start your ad: {}", draft["data"]["review_url"]);
 ```
+
+With a key that has `ads:spend`, `client.ads().drafts().launch(group_id, LaunchAdDraftParams { confirm_budget_amount: Some(10.0), ..Default::default() })` (`group_id` from `draft["data"]["group_id"]`) starts the draft after the person agreed to the amount; Google is skipped with code `start_in_app`. Without `ads:spend` the call answers `403 start_in_app`.
 
 A draft needs no ad account; `client.ads().drafts().attach_account(group_id, AttachAdDraftAccountParams { platform, ad_account_id })` sets one, and `campaigns[].readiness` says what still stops a network. `drafts().update` replaces the draft with the full body (`PUT`). On Meta an ad can carry a second upright 9:16 file for Stories and Reels: `placement_media: Some(AdPlacementMedia { stories_reels: Some(AdMediaFile { .. }) })`.
 
@@ -1018,17 +1041,61 @@ let boost = client.ads().boost(BoostPostParams {
     targeting: Some(json!({ "countries": ["NL"] })),
     ..Default::default()
 }).await?;
-let campaign_id = boost["data"]["id"].as_str().unwrap();
 
-// The boost is a draft. Start it only after the person confirmed 5 a day:
-client.ads().activate(campaign_id, 5.0).await?;
+// The boost is a draft: the person starts it in OmniSocials.
+println!("{}", boost["data"]["status"]); // "draft"
 ```
 
-`client.ads().boost_multi(...)` makes one draft boost per ad account (up to 10, the same budget each). `client.ads().suggestions()` lists posts that do better than your median, `client.ads().overview()` the totals, and `list`, `get`, `pause`, `resume` and `delete` manage campaigns. Keyword ideas through the connected Google Ads account: `client.ads().research_keywords(KeywordResearchParams { keywords: Some(vec!["running shoes".into()]), country: Some("NL".into()), ..Default::default() })` and `client.ads().keyword_metrics(KeywordMetricsParams { keywords: vec![...], ..Default::default() })`.
+`client.ads().boost_multi(...)` makes one draft boost per ad account (up to 10, the same budget each). `client.ads().suggestions()` lists posts that do better than your median, `client.ads().overview()` the totals, and `list`, `get`, `pause` and `delete` manage campaigns. Keyword ideas through the connected Google Ads account: `client.ads().research_keywords(KeywordResearchParams { keywords: Some(vec!["running shoes".into()]), country: Some("NL".into()), ..Default::default() })` and `client.ads().keyword_metrics(KeywordMetricsParams { keywords: vec![...], ..Default::default() })`.
+
+
+### The rest of the Ads API
+
+Each group hangs off `client.ads()`. A network without a feature answers `400 not_supported_on_network`; `capabilities()` lists what each network offers (`data.features`). Ids are strings like everywhere in this crate. A query is anything that serializes to a JSON object (`json!({"from": "2026-10-01", "limit": 50})`; a list becomes a comma list, `null` is left out; pass `()` for none) and a body anything that serializes to JSON; results are `serde_json::Value`.
+
+| Accessor | What it covers |
+|----------|----------------|
+| `objects()` | the live tree of an ad account (`tree`), one campaign, ad set or ad (`get`, `update`, `set_status`, `duplicate`), the import of campaigns made outside OmniSocials (`import_status`, `start_import`, `list_external`, `get_external`) |
+| `campaign_ads()` | the ads of a campaign: `list`, `add` (created paused), `get`, `set_status`, `review` |
+| `targeting()` | `search`, `browse`, `reach_estimate`, `bid_suggestions` |
+| `audiences()` | customer lists, lookalikes and company lists: `list`, `create`, `get`, `update`, `delete`, `add_members`, `remove_members`, `add_companies` (raw emails and phones are hashed before they leave) |
+| `lead_forms()`, `leads()` | lead forms (`list`, `create`, `get`, `update`, `delete`, `send_test_lead`) and their leads (`list`, `counts`, `update`) |
+| `conversions()` | `destinations`, `goals`, `create_custom`, `send_events` |
+| `insights()`, `reports()` | `query`, `campaign`, `ad`, `timeline`, `performance`, `alerts`; background reports (`list`, `start`, `get`) |
+| `rules()` | automated rules: `list`, `create`, `templates`, `preview`, `activity`, `undo`, `get`, `update`, `delete`, `preview_saved`, `runs` |
+| `results()` | your own numbers per campaign and day: `list`, `upload`, `totals`, `metrics`, `put_metric` |
+| `media()`, `previews()`, `partnership()`, `comments()` | the network's media library, previews drawn by the network (`create`, `for_ad`), Meta partnership ads (`list_content`, `list_permissions`, `set_permission`), comments on ads |
+| `accounts()` | one ad account: `identities`, `health`, `finance`, `update_settings`, `list_users`, `add_user`, `remove_user`, `activity`, `businesses`, `dsa`, `hierarchy` |
+| `reach_frequency()`, `studies()`, `budget_schedules()` | Meta reach and frequency, A/B tests, planned budget increases |
+| `google()` | Google reports: `search_terms`, `recommendations`, `keywords`, `assets`, `shared_budgets`, `bid_strategies`, `ad_schedule`, `labels`, `local_services_leads` |
+
+On campaigns: `client.ads().duplicate(id, ())` (a new draft) and `client.ads().bulk_status(&ids, "paused", None)`. `UpdateAdCampaignParams` takes `settings` (while the campaign is a draft), `AdDraftPlatform::Detailed` takes `settings` and `AdDraftTargeting` takes `networks` (the network's own targeting).
+
+```rust
+use serde_json::json;
+
+// Search an interest, then target it on Meta in a draft.
+let found = client
+    .ads()
+    .targeting()
+    .search(json!({"ad_account_id": 51, "type": "interest", "q": "yoga"}))
+    .await?;
+let item = &found["data"]["items"][0];
+let targeting = omnisocials::AdDraftTargeting {
+    countries: vec!["NL".into()],
+    networks: Some(json!({"meta": {"include": {"interest": [{"id": item["id"], "name": item["name"]}]}}})),
+    ..Default::default()
+};
+
+// Pause one ad set made outside OmniSocials (no amount needed to pause).
+client.ads().objects().set_status("51", "ad_set", "23851", "paused", None).await?;
+```
+
+The same money rule holds here: switching anything on (`objects().set_status`, `campaign_ads().set_status`, `bulk_status` with `"active"`), a higher budget (`objects().update`), a rule that can raise spend (`rules().create` and `rules().update` with `confirm_max_daily_budget`, `rules().undo`), a higher spend cap (`accounts().update_settings`), a reach and frequency reservation (`reach_frequency().reserve`) and a planned budget increase (`budget_schedules().create`) each need the amount from the person's explicit yes, and none of them is retried after a 5xx or a connection error. These calls, and the other changes of a campaign on the network (`objects().duplicate`, `campaign_ads().add`, `studies().create`), need a key with `ads:spend`: without it, and on Google always, they answer `403 start_in_app` with the page where a person does it in the app. A rule that switches on or raises a budget needs `ads:spend` too (else `403 rule_raises_spend`); a rule that notifies, pauses or lowers a budget works with `ads:write`, and no rule acts on Google. Pausing, deleting and archiving stay open, except on Google.
 
 ## Webhooks
 
-Events: `post.scheduled`, `post.published`, `post.failed`, `post.approved` (the last step of a post's approval workflow is approved) and `post.rejected` (an approver rejects the post; it will not publish). The two approval events carry `data.approval` with `status`, `decided_by` (the approver's user id) and `reason` (`null` on `post.approved`), and an empty `data.targets`. `ad.status_changed` fires when an ad campaign changes status (for example `pending_review` to `active` or `rejected`); its `data` is the campaign, not a post: `campaign_id`, `workspace_id`, `name`, `platform`, `campaign_type`, `status`, `previous_status`, `external_campaign_id` and `budget`.
+Events: `post.scheduled`, `post.published`, `post.failed`, `post.approved` (the last step of a post's approval workflow is approved) and `post.rejected` (an approver rejects the post; it will not publish). The two approval events carry `data.approval` with `status`, `decided_by` (the approver's user id) and `reason` (`null` on `post.approved`), and an empty `data.targets`. `ad.status_changed` fires when an ad campaign changes status (for example `pending_review` to `active` or `rejected`); its `data` is the campaign, not a post: `campaign_id`, `workspace_id`, `name`, `platform`, `campaign_type`, `status`, `previous_status`, `external_campaign_id` and `budget`. More ad events: `ad.created`, `ad.updated`, `ad.review`, `ad.delivery_issue`, `campaign.created`, `campaign.updated`, `campaign.budget` (these carry the campaign plus `details`), `lead.received`, `ads.sync_failed`, `ads.sync_recovered`, `ads.initial_sync_completed` and `ad_rule.triggered`. Subscribing to `ad.status_changed` or any other ads event needs the `ads:read` scope on the key and `access_ads` for its person (`403 insufficient_scope` / `insufficient_permission`).
 
 ### Manage endpoints
 
@@ -1049,9 +1116,11 @@ client.webhooks().update(id, UpdateWebhookParams {
     ..Default::default()
 }).await?;
 let rotated = client.webhooks().rotate_secret(id).await?;
-println!("{}", rotated["data"]["secret"]); // the old secret stops working
+println!("{}", rotated["data"]["secret"]); // the old secret keeps signing for 24 hours
 client.webhooks().delete(id).await?;
 ```
+
+Every webhook carries `workspace_id`. `list` and `get` also return the organisation-wide webhooks of the key's organisation (`workspace_id` `null`, made in the OmniSocials dashboard; they receive the events of every workspace), and `update`, `delete` and `rotate_secret` work on them too. Webhooks you create through the API belong to the key's workspace. When the person behind a webhook loses access to the organisation or workspace, OmniSocials switches the webhook off: `is_active` is `false` and `last_failure.error` says why. `update` with `is_active: Some(true)` switches it on again.
 
 ### Verify deliveries (axum example)
 
@@ -1099,6 +1168,31 @@ let app: Router = Router::new().route("/omnisocials/webhook", post(omnisocials_w
 ```
 
 `verify_signature` uses a constant-time comparison, rejects timestamps older than the tolerance (300 seconds here; replay protection), returns `Error::WebhookVerification` on any failure, and returns the parsed event on success.
+
+### Rotate the secret without missing deliveries
+
+For 24 hours after `rotate_secret`, every delivery carries two headers: `X-OmniSocials-Signature`, signed with the new secret, and `X-OmniSocials-Signature-Previous`, signed with the old secret (same format, same timestamp and body). Verify the first with the new secret and, when that fails, the second with the old one:
+
+```rust
+use omnisocials::webhooks::{verify_signature, DEFAULT_TOLERANCE_SECS};
+
+fn verify_delivery(
+    body: &[u8],
+    headers: &HeaderMap,
+    new_secret: &str,
+    old_secret: &str,
+) -> Result<serde_json::Value, omnisocials::Error> {
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("");
+    verify_signature(body, header("x-omnisocials-signature"), new_secret, DEFAULT_TOLERANCE_SECS).or_else(|err| {
+        match header("x-omnisocials-signature-previous") {
+            "" => Err(err),
+            previous => verify_signature(body, previous, old_secret, DEFAULT_TOLERANCE_SECS),
+        }
+    })
+}
+```
+
+Rotating again within the 24 hours replaces the previous secret with the one you just rotated out.
 
 ## Limits and feature requests
 
