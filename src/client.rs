@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::error::Error;
 use crate::resources::Tags;
-use crate::resources::{FeatureRequests, Limits};
+use crate::resources::{Credits, FeatureRequests, Limits};
 use crate::resources::{
     Accounts, Ads, Analytics, ApprovalWorkflows, Audio, Automations, Folders, HashtagSets, Inbox,
     Locations, Media, Pinterest, Posts, Webhooks,
@@ -224,14 +224,19 @@ impl Client {
         ApprovalWorkflows { client: self }
     }
 
-    /// Connected social accounts: list, get.
+    /// Connected social accounts: list, get, update.
     pub fn accounts(&self) -> Accounts<'_> {
         Accounts { client: self }
     }
 
-    /// Analytics: post, posts, overview, accounts, best_times.
+    /// Analytics: post, posts, refresh_post, overview, accounts, best_times.
     pub fn analytics(&self) -> Analytics<'_> {
         Analytics { client: self }
+    }
+
+    /// The organisation's credit balance and what X statistics cost: get.
+    pub fn credits(&self) -> Credits<'_> {
+        Credits { client: self }
     }
 
     /// Instagram location tagging: search, validate.

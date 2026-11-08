@@ -1532,7 +1532,9 @@ pub struct CreateWebhookParams {
     /// `ad.review`, `ad.delivery_issue`, `campaign.created`,
     /// `campaign.updated`, `campaign.budget`, `lead.received`,
     /// `ads.sync_failed`, `ads.sync_recovered`,
-    /// `ads.initial_sync_completed`, `ad_rule.triggered`. Any ads event needs
+    /// `ads.initial_sync_completed`, `ad_rule.triggered`, and
+    /// `x_statistics.paused` / `x_statistics.resumed`
+    /// ([`crate::X_STATISTICS_WEBHOOK_EVENTS`]). Any ads event needs
     /// the `ads:read` scope on the key and `access_ads` for its person, else
     /// `403 insufficient_scope` / `insufficient_permission`.
     pub events: Vec<String>,

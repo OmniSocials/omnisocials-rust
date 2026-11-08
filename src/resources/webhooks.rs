@@ -38,7 +38,10 @@ impl Webhooks<'_> {
     /// `ad.updated`, `ad.review`, `ad.delivery_issue`, `campaign.created`,
     /// `campaign.updated`, `campaign.budget`, `lead.received`,
     /// `ads.sync_failed`, `ads.sync_recovered`, `ads.initial_sync_completed`,
-    /// `ad_rule.triggered`). The response includes the signing `secret`;
+    /// `ad_rule.triggered`, and for X statistics `x_statistics.paused` and
+    /// `x_statistics.resumed`, whose `data` is `{ workspace_id, account_id,
+    /// reason }` with `reason` `insufficient_credits` or `credits_added`).
+    /// The response includes the signing `secret`;
     /// save it, it is only shown once. An `ad.status_changed` delivery
     /// carries the campaign in `data` (`campaign_id`, `workspace_id`, `name`,
     /// `platform`, `campaign_type`, `status`, `previous_status`,

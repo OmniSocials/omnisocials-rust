@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::client::{encode_path_segment, Client};
+use crate::client::{encode_path_segment, Client, Retry};
 use crate::error::Error;
 use crate::types::{AccountAnalyticsParams, AnalyticsOverviewParams, BestTimesParams};
 
@@ -17,6 +17,27 @@ impl Analytics<'_> {
             .get(
                 &format!("/analytics/posts/{}", encode_path_segment(post_id)),
                 Vec::new(),
+            )
+            .await
+    }
+
+    /// `POST /analytics/posts/:id/refresh` - "Update now": read the X numbers
+    /// of one published post now, outside its check schedule. X bills every
+    /// read, so it costs half a credit per tweet (each part of a thread
+    /// counts, plus half a credit for a video or GIF), and nothing when the
+    /// post was already read today (UTC). OmniSocials Connect accounts pay on
+    /// the partner's own X app. At most 5 reads of a post a UTC day. Needs
+    /// `analytics:read`. Returns `{"data": {"post_id", "tweets": [{"id",
+    /// "metrics", "read_at"}], "credits_used", "read_at"}}`. Because it can
+    /// cost credits it is retried only after a 429, never after a 5xx, a
+    /// timeout or a dropped connection. Errors: 402 `insufficient_credits`,
+    /// 404 `not_found`, 409 `refresh_not_available` (no published X tweet),
+    /// 429 `refresh_limit`, 502 `refresh_failed` (nothing charged).
+    pub async fn refresh_post(&self, post_id: &str) -> Result<Value, Error> {
+        self.client
+            .post_empty_with(
+                &format!("/analytics/posts/{}/refresh", encode_path_segment(post_id)),
+                Retry::RateLimit,
             )
             .await
     }

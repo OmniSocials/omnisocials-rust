@@ -358,7 +358,7 @@ if let Some(warnings) = res["warnings"].as_array() {
 }
 ```
 
-From `enforce_from` (2026-08-14) the balance is checked at publish time, but credits are only deducted after the post successfully publishes (a failed publish is never charged). If the balance can't cover it, only the X target fails (other platforms publish normally); top up in the dashboard under Settings -> Organisation -> Billing -> Credits, then call `posts().retry`. Posts without links, analytics, and media on X stay free. There is no API endpoint for credits — they are managed in the dashboard.
+From `enforce_from` (2026-08-14) the balance is checked at publish time, but credits are only deducted after the post successfully publishes (a failed publish is never charged). If the balance can't cover it, only the X target fails (other platforms publish normally); top up in the dashboard under Settings -> Organisation -> Billing -> Credits, then call `posts().retry`. Posts without links and media on X stay free. X statistics use credits too, at X's price (see [X statistics use credits](#x-statistics-use-credits)). `client.credits().get()` reads the balance; top-ups are made in the dashboard.
 
 Separately, from 2026-08-14, `create`, `update`, and `publish` also gate up front: if reserving this post's cost would push the company's total reserved credits past its balance, the call is refused before it's ever accepted, with `Error::Api` (status 402) and code `x_credits_insufficient`. `error.details` on that response carries `credits_required`, `credits_balance`, and `credits_reserved`. Drafts (no `scheduled_at`) are never gated, and neither is a post scheduled to publish before 2026-08-14.
 
@@ -736,6 +736,8 @@ let one = client.accounts().get(first_id).await?;
 
 `status` is `active` or `needs_reconnect` (the token was revoked or expired; Bluesky also when its sign-in could not be renewed). Posts to a `needs_reconnect` account fail until it is reconnected in the OmniSocials app. OmniSocials Connect customer workspaces can also show `pick_pending` (Facebook, Connect customers only: no Page chosen yet).
 
+An X account also carries `x_statistics` (`posts`, `followers`, `post_schedule`, `source`, `billing`, `state`, `paused_reason`): how often OmniSocials reads its X statistics and who pays. `client.accounts().update(id, UpdateAccountParams { .. })` changes it; see [X statistics use credits](#x-statistics-use-credits).
+
 ## Analytics
 
 ```rust
@@ -780,6 +782,40 @@ for slot in best["recommendations"].as_array().into_iter().flatten() {
     println!("{} {} {}", slot["day"], slot["time"], slot["score"]);
 }
 ```
+
+### X statistics use credits
+
+X bills every statistics read, and OmniSocials passes X's price on as credits: half a credit per post check (plus half a credit when the tweet has a video or GIF; each part of a thread counts) and 1 credit per follower count. Every X account carries `x_statistics`:
+
+- `posts`: how often each post is checked. `full` (5 checks: about 5 hours, day 1, 3 and 7, and day 30 for posts with 100+ views), `light` (2 checks: about 5 hours and day 7) or `off`.
+- `followers`: how often the follower count is read. `daily`, `weekly` or `off`.
+- `source` (`account` or `default`), `billing` (`credits`), `state` (`active`, `paused`, `off`) and `paused_reason` (`insufficient_credits` or null).
+
+When the balance reaches 0 the reads pause (`state` `paused`) and start again by themselves after a top-up; the webhook events `x_statistics.paused` and `x_statistics.resumed` say so. `x_statistics.charging` in the answer of `client.credits().get()` says whether reads are charged yet and from when.
+
+```rust
+use omnisocials::{UpdateAccountParams, XStatisticsInput};
+
+// How often an X account is checked (opt-in scope accounts:write, billing rights)
+let account = client.accounts().update("1234_x", UpdateAccountParams {
+    x_statistics: Some(XStatisticsInput {
+        posts: Some("light".into()), // one field or both
+        followers: Some("daily".into()),
+        ..Default::default()
+    }),
+}).await?;
+println!("{}", account["data"]["x_statistics"]["state"]);
+
+// "Update now": read one post's X numbers now (scope analytics:read)
+let fresh = client.analytics().refresh_post("9123").await?;
+println!("{} credits", fresh["data"]["credits_used"]);
+
+// The balance and what X statistics cost (opt-in scope credits:read, billing rights)
+let credits = client.credits().get().await?;
+println!("{} {}", credits["data"]["balance"], credits["data"]["x_statistics"]["total_credits_month"]);
+```
+
+`analytics().refresh_post` costs nothing when the post was already read that day (UTC) and works at most 5 times a post and 100 times an organisation a day. Errors: `402 insufficient_credits`, `409 refresh_not_available` (no published X tweet), `429 refresh_limit`, `502 refresh_failed` (nothing charged). Because it can cost credits, the SDK retries it only after a 429, never after a 5xx or a timeout. `accounts().update` needs the opt-in scope `accounts:write` and billing rights (manage_billing) for the key's creator, sends only the keys you give, and answers `400 validation_error`, `invalid_value` or `not_supported` (not an X account) and `403 insufficient_permission` (no billing rights for the key's creator). `credits().get` needs the opt-in scope `credits:read` and billing rights.
 
 ## Inbox
 
@@ -1095,7 +1131,7 @@ The same money rule holds here: switching anything on (`objects().set_status`, `
 
 ## Webhooks
 
-Events: `post.scheduled`, `post.published`, `post.failed`, `post.approved` (the last step of a post's approval workflow is approved) and `post.rejected` (an approver rejects the post; it will not publish). The two approval events carry `data.approval` with `status`, `decided_by` (the approver's user id) and `reason` (`null` on `post.approved`), and an empty `data.targets`. `ad.status_changed` fires when an ad campaign changes status (for example `pending_review` to `active` or `rejected`); its `data` is the campaign, not a post: `campaign_id`, `workspace_id`, `name`, `platform`, `campaign_type`, `status`, `previous_status`, `external_campaign_id` and `budget`. More ad events: `ad.created`, `ad.updated`, `ad.review`, `ad.delivery_issue`, `campaign.created`, `campaign.updated`, `campaign.budget` (these carry the campaign plus `details`), `lead.received`, `ads.sync_failed`, `ads.sync_recovered`, `ads.initial_sync_completed` and `ad_rule.triggered`. Subscribing to `ad.status_changed` or any other ads event needs the `ads:read` scope on the key and `access_ads` for its person (`403 insufficient_scope` / `insufficient_permission`).
+Events: `post.scheduled`, `post.published`, `post.failed`, `post.approved` (the last step of a post's approval workflow is approved) and `post.rejected` (an approver rejects the post; it will not publish). The two approval events carry `data.approval` with `status`, `decided_by` (the approver's user id) and `reason` (`null` on `post.approved`), and an empty `data.targets`. `ad.status_changed` fires when an ad campaign changes status (for example `pending_review` to `active` or `rejected`); its `data` is the campaign, not a post: `campaign_id`, `workspace_id`, `name`, `platform`, `campaign_type`, `status`, `previous_status`, `external_campaign_id` and `budget`. More ad events: `ad.created`, `ad.updated`, `ad.review`, `ad.delivery_issue`, `campaign.created`, `campaign.updated`, `campaign.budget` (these carry the campaign plus `details`), `lead.received`, `ads.sync_failed`, `ads.sync_recovered`, `ads.initial_sync_completed` and `ad_rule.triggered`. Subscribing to `ad.status_changed` or any other ads event needs the `ads:read` scope on the key and `access_ads` for its person (`403 insufficient_scope` / `insufficient_permission`). `x_statistics.paused` and `x_statistics.resumed` fire when the organisation's X statistics stop at 0 credits or start again after a top-up, one delivery per workspace with X; `data` is `{ workspace_id, account_id, reason }` (`reason` is `insufficient_credits` or `credits_added`). `omnisocials::X_STATISTICS_WEBHOOK_EVENTS` holds the names.
 
 ### Manage endpoints
 
@@ -1287,7 +1323,7 @@ The `err.status()`, `err.code()`, and `err.retry_after()` accessors work across 
 
 ## API scopes
 
-Each API key carries scopes: `posts:read`, `posts:write`, `media:write`, `accounts:read`, `analytics:read`, `webhooks:manage`, plus the opt-in `automations:read` / `automations:write` for comment-to-DM automations. A call with a missing scope returns `Error::PermissionDenied` with code `insufficient_scope`.
+Each API key carries scopes: `posts:read`, `posts:write`, `media:write`, `accounts:read`, `analytics:read`, `webhooks:manage`, plus the opt-in `automations:read` / `automations:write` for comment-to-DM automations, `accounts:write` for `accounts().update` and `credits:read` for `credits().get`. A call with a missing scope returns `Error::PermissionDenied` with code `insufficient_scope`.
 
 ## Documentation
 

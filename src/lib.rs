@@ -46,11 +46,15 @@ pub mod resources;
 mod tag_params;
 mod types;
 pub mod webhooks;
+mod x_statistics_params;
 
 pub use client::{Client, ClientBuilder, VERSION};
 pub use error::Error;
 pub use feature_request_params::{CreateFeatureRequestParams, ListLimitsParams};
 pub use tag_params::{ApplyTagsParams, CreateTagParams, TagAnalyticsParams, TagRef, UpdateTagParams};
+pub use x_statistics_params::{
+    UpdateAccountParams, XStatisticsInput, XStatisticsPostSchedule, X_STATISTICS_WEBHOOK_EVENTS,
+};
 pub use types::{
     AccountAnalyticsParams, AdBudget, AdDraftAd, AdDraftParams, AdDraftPlatform, AdDraftSchedule,
     AdDraftTargeting, AdMediaFile, AdPlacementMedia, AdSchedule, AnalyticsOverviewParams,
