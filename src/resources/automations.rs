@@ -125,7 +125,9 @@ impl Automations<'_> {
     /// events is left out). Each event carries `kind` (`comment`, `dm`,
     /// `story_reply`), `outcome`, `reason` / `reason_label` (X adds the skip
     /// reasons `dms_closed`, `no_credits`, `opted_out` and
-    /// `automation_off`; Follow first adds `already_waiting`), `person`
+    /// `automation_off`; Follow first adds `already_waiting`;
+    /// `plan_inactive` = the organisation had no active plan or trial, so
+    /// nothing was sent), `person`
     /// (`id`, `username`; on Facebook the person's name, since Facebook has
     /// no @handle), `trigger_id`, `trigger_text`, `message` (the DM
     /// sent), `public_reply`, `platform_message_id`, `follow_gate` (Follow

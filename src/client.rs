@@ -375,6 +375,7 @@ impl Client {
         body: RequestBody,
         retry: Retry,
     ) -> Result<Value, Error> {
+        check_path(path)?;
         let url = format!(
             "{}{}{}",
             self.base_url,
@@ -472,6 +473,26 @@ impl Client {
         let jitter = 0.75 + (nanos as f64 / 1_000_000_000.0) * 0.5;
         Duration::from_secs_f64((base * jitter).min(30.0))
     }
+}
+
+/// Refuse a request path with an empty, `.` or `..` segment. Every id in the
+/// path was encoded with [`encode_path_segment`], which leaves `.` and `..` as
+/// they are: URL normalisation drops such a segment or climbs one level, so an
+/// id of `..` would reach another endpoint of the same API key, and an empty id
+/// the list route. Nothing is sent; the answer is [`Error::Validation`] with
+/// code `invalid_path`.
+pub(crate) fn check_path(path: &str) -> Result<(), Error> {
+    let path_only = path.split('?').next().unwrap_or("");
+    let path_only = path_only.strip_prefix('/').unwrap_or(path_only);
+    if path_only.split('/').any(|segment| matches!(segment, "" | "." | "..")) {
+        return Err(Error::Validation {
+            status: 400,
+            code: Some("invalid_path".into()),
+            message: format!("Invalid request path {path:?}: an id cannot be empty, \".\" or \"..\"."),
+            body: None,
+        });
+    }
+    Ok(())
 }
 
 /// Percent-encode a path segment (RFC 3986 unreserved characters pass through).
@@ -628,6 +649,18 @@ mod tests {
     fn encodes_path_segments() {
         assert_eq!(encode_path_segment("abc-123_ok.~"), "abc-123_ok.~");
         assert_eq!(encode_path_segment("a/b c?"), "a%2Fb%20c%3F");
+    }
+
+    #[test]
+    fn refuses_dot_and_empty_segments() {
+        assert!(check_path("/posts/123/publish").is_ok());
+        assert!(check_path("/ads/accounts/3/tree?status=active").is_ok());
+        assert!(check_path(&format!("/posts/{}/publish", encode_path_segment("../x#"))).is_ok());
+        for bad in ["", ".", ".."] {
+            let path = format!("/posts/{}/publish", encode_path_segment(bad));
+            let err = check_path(&path).expect_err("a dot or empty id is refused");
+            assert_eq!(err.code(), Some("invalid_path"));
+        }
     }
 
     #[test]

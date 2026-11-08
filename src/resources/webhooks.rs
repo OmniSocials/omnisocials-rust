@@ -55,7 +55,13 @@ impl Webhooks<'_> {
     /// Works on organisation-wide webhooks too. `is_active: Some(true)`
     /// switches on a webhook that was switched off (also an automatic
     /// switch-off); setting `url`, `events` or switching it on makes the
-    /// key's creator the person behind the webhook.
+    /// key's creator the person behind the webhook. Setting `url` on an
+    /// organisation-wide webhook (even its current one) moves it to the
+    /// key's workspace: from then on it gets only that workspace's events,
+    /// and the answer shows the new `workspace_id`. When the webhook has Ads
+    /// events after the change, setting `url` or `events` or switching it on
+    /// needs the `ads:read` scope and `access_ads` for the key's creator
+    /// (403 otherwise, nothing changed).
     pub async fn update(&self, id: &str, params: UpdateWebhookParams) -> Result<Value, Error> {
         self.client
             .patch_json(&format!("/webhooks/{}", encode_path_segment(id)), &params)

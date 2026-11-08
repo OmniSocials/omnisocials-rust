@@ -945,3 +945,40 @@ fn env_fallback_and_builder_precedence() {
 
     std::env::remove_var(ENV_KEY);
 }
+
+// ─── Path segments ───────────────────────────────────────────────────────────
+// An id stays inside one encoded path segment, and an id of "", "." or ".." is
+// refused before anything is sent: URL normalisation would drop that segment
+// or climb a level and reach another endpoint of the same API key.
+
+#[tokio::test]
+async fn a_hostile_id_stays_inside_one_segment() {
+    let (base_url, handle) = spawn_stub(vec![http_response(200, "OK", &[], r#"{"data":{}}"#)]);
+    let client = client_for(&base_url, 0);
+    client.posts().publish("../webhooks/wh_fake/rotate-secret#").await.unwrap();
+    let captured = handle.join().unwrap();
+    assert!(
+        captured[0].starts_with("POST /posts/..%2Fwebhooks%2Fwh_fake%2Frotate-secret%23/publish HTTP/1.1"),
+        "{}",
+        captured[0]
+    );
+}
+
+#[tokio::test]
+async fn dot_and_empty_ids_are_refused_before_sending() {
+    // Port 9 is closed: a refused id answers invalid_path without a
+    // connection, one that is sent would answer a connection error.
+    let client = client_for("http://127.0.0.1:9", 0);
+    for bad in ["", ".", ".."] {
+        let results = [
+            client.posts().delete(bad).await,
+            client.webhooks().rotate_secret(bad).await,
+            client.inbox().mark_read(bad).await,
+            client.ads().drafts().get(bad).await,
+        ];
+        for result in results {
+            let err = result.expect_err("a dot or empty id is refused");
+            assert_eq!(err.code(), Some("invalid_path"), "{bad:?}: {err}");
+        }
+    }
+}
