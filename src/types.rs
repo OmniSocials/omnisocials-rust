@@ -262,7 +262,8 @@ pub struct CreatePostParams {
     /// "variations": ["..."]}}, "limits": {"max_sends": 500}, "platforms":
     /// ["instagram", "facebook"]})` (see [`CreateAutomationParams`] for the
     /// fields, also `actions.follow_gate`, Follow first, which applies to the
-    /// Instagram automation only). `platforms` makes one automation per
+    /// Instagram automation only, and `actions.follow_up`, the follow-up,
+    /// which applies to both). `platforms` makes one automation per
     /// listed channel; each
     /// must be a channel of the post. Without it: Instagram when the post
     /// goes there, else Facebook. Needs the `automations:write` scope on the
@@ -417,7 +418,8 @@ pub struct UpdatePostParams {
     /// Replaces the post's comment-to-DM automations (same shape as
     /// [`CreatePostParams::comment_dm_automation`]; a channel no longer in
     /// `platforms` loses its automation). `json!(null)` removes them all;
-    /// omit to leave them untouched. Needs the `automations:write` scope.
+    /// omit to leave them untouched. An `actions` without `follow_up` keeps
+    /// the stored follow-up. Needs the `automations:write` scope.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment_dm_automation: Option<Value>,
     /// Replaces the post's tags (ids or names, a new name becomes a tag).
@@ -869,10 +871,11 @@ pub struct ListAutomationsParams {
 #[derive(Debug, Clone, Default)]
 pub struct ListAutomationEventsParams {
     /// `"sent"`, `"skipped"`, `"failed"`, `"pending"`, `"queued"` (the
-    /// answer waits for a free slot under the send cap and goes out within
-    /// the hour), `"opted_out"` (the person replied STOP on X) or
+    /// answer waits for a free slot under the send cap and goes out as soon
+    /// as there is room), `"opted_out"` (the person replied STOP on X) or
     /// `"waiting"` (Follow first: asked to follow, the link goes out after
-    /// the follow).
+    /// the follow; or the tap step of a follow-up: the link goes out after
+    /// the tap).
     pub outcome: Option<String>,
     /// Events per page, 1 to 100 (default 25).
     pub limit: Option<u32>,
@@ -938,6 +941,33 @@ pub struct CreateAutomationParams {
     /// X automation is a `400 follow_gate_instagram_only`. The response
     /// carries the gate with its texts (null on Facebook and X) and
     /// `stats.followed`.
+    ///
+    /// An optional `"follow_up": {"enabled": true, "text": "...",
+    /// "delay_hours": 23, "button": {"title": "...", "url": "https://..."},
+    /// "tap": {"text": "...", "button": "..."}}`: the follow-up, Instagram
+    /// and Facebook. It sends one more DM `delay_hours` (1 to 23, default
+    /// 23) after the answer (the `dm` text) went out. `text` is required
+    /// when it is on (max 1000 characters, 640 with a `button`); `button` is
+    /// an optional link button (`title` 1 to 20 characters, `url` an
+    /// `https://` or `http://` address of up to 2000). Meta allows an
+    /// automatic message only within 24 hours after the person's last DM,
+    /// button tap or quick reply; the comment and the private reply do not
+    /// open that window. So on an Instagram comment with Follow first off
+    /// the first DM becomes a tap step, a short text with one button
+    /// (`tap`, Instagram only, `text` max 640 and `button` max 20
+    /// characters; default "Tap the button and I'll send you the link 👇" /
+    /// "Send me the link"): the tap sends the link, and until then the event
+    /// is `"waiting"` with `follow_gate.mode` `"tap"`. People who never tap
+    /// get no link and no follow-up. With Follow first on, its own tap is
+    /// the tap; DM and story reply triggers need none. A Facebook comment
+    /// answer has no button: only people who answer the DM in Messenger get
+    /// the follow-up. `null`, `false` or `{"enabled": false}` turns it off
+    /// and keeps the texts. `"enabled": true` on an X automation is a
+    /// `400 follow_up_not_supported`. The response carries
+    /// `actions.follow_up` (`enabled`, `text`, `delay_hours`, `button` or
+    /// null, `tap` filled in on Instagram and null on Facebook; the whole
+    /// follow-up is null on X) and `stats.follow_ups_sent` /
+    /// `stats.follow_ups_skipped`.
     pub actions: Value,
     /// `json!({"max_sends": 500, "stop_at": "2026-12-31T00:00:00Z"})`, both
     /// optional.
@@ -980,7 +1010,10 @@ pub struct UpdateAutomationParams {
     /// public reply; `"public_reply": {"enabled": false}` or
     /// `{"variations": []}` turns it off. `follow_gate` merges too:
     /// `{"enabled": false}` keeps its texts, new texts keep the switch,
-    /// `null` turns it off.
+    /// `null` turns it off. `follow_up` merges the same way: keys left out
+    /// keep their value, `tap` merges key by key, `"button": null` removes
+    /// the button, and `null`, `false` or `{"enabled": false}` turns it off
+    /// and keeps the texts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actions: Option<Value>,
     /// Merged into the stored limits (see

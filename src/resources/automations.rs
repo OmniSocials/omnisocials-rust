@@ -17,9 +17,10 @@ use crate::types::{
 /// ends with "Reply STOP to stop automatic messages." and a person who
 /// replies STOP gets no automatic DM again. Meta rules, the same on
 /// Instagram and Facebook: one private reply per comment, within 7 days.
-/// OmniSocials caps sends at 180 DMs an hour per account on Instagram and
+/// OmniSocials caps sends at 700 DMs an hour per account on Instagram and
 /// Facebook, and at 15 per 15 minutes and 450 a day on X; an answer over a
-/// cap waits in a queue (`queued`) for up to an hour. The scopes are
+/// cap waits in a queue (`queued`) for up to about a day on Instagram and
+/// Facebook (an hour on X). The scopes are
 /// opt-in on the API key: `automations:read` for `list`, `get` and
 /// `list_events`, `automations:write` for `create`, `update` and `delete`
 /// (and for [`crate::CreatePostParams::comment_dm_automation`]).
@@ -69,9 +70,14 @@ impl Automations<'_> {
     /// (`dm.text`, max 1000 characters). `actions.follow_gate` (Follow
     /// first, Instagram only) sends the link only to people who follow the
     /// account; a person who has not followed yet is an event with outcome
-    /// `"waiting"` (see [`CreateAutomationParams::actions`]). Requires the
+    /// `"waiting"` (see [`CreateAutomationParams::actions`]).
+    /// `actions.follow_up` (Instagram and Facebook) sends one more DM
+    /// `delay_hours` (1 to 23, default 23) after the answer; on an Instagram
+    /// comment with Follow first off the first DM becomes a tap step and the
+    /// event is `"waiting"` until the tap. Requires the
     /// `automations:write` scope (opt-in on the API key). Errors:
     /// `400 validation_error`, `400 follow_gate_instagram_only`,
+    /// `400 follow_up_not_supported` (a follow-up switched on on X),
     /// `400 post_not_instagram`, `400 post_not_facebook`,
     /// `400 post_required`, `404 post_not_found`,
     /// `404 instagram_media_not_found`, `404 facebook_post_not_found`,
@@ -90,15 +96,19 @@ impl Automations<'_> {
     /// `limits.stop_at` keeps `max_sends`. `public_reply.enabled: false` or
     /// `variations: []` turns the public reply off; `follow_gate.enabled:
     /// false` turns Follow first off and keeps its texts, new texts keep the
-    /// switch, and `"follow_gate": null` turns it off; `limits.max_sends:
-    /// null` removes that limit. `status: "paused"` pauses and `"active"`
+    /// switch, and `"follow_gate": null` turns it off; `follow_up` merges
+    /// the same way (`tap` key by key, `"button": null` removes the button,
+    /// `null`, `false` or `{"enabled": false}` turns it off and keeps the
+    /// texts); `limits.max_sends: null` removes that limit. `status: "paused"` pauses and `"active"`
     /// resumes; another `post_id` / `instagram_media_id` /
     /// `facebook_post_id` moves the automation to that post. The platform
     /// cannot change (`400 platform_immutable`). `status: "active"` on an X
     /// automation needs X DMs on for the workspace (`409 x_dms_off`). A
     /// `completed` automation starts again when its limits or trigger
     /// change. Requires the
-    /// `automations:write` scope. `400 no_fields` when the body is empty.
+    /// `automations:write` scope. `400 no_fields` when the body is empty;
+    /// `400 follow_up_not_supported` for a follow-up switched on on an X
+    /// automation.
     pub async fn update(&self, id: &str, params: UpdateAutomationParams) -> Result<Value, Error> {
         self.client
             .patch_json(&format!("/automations/{}", encode_path_segment(id)), &params)
@@ -116,7 +126,8 @@ impl Automations<'_> {
     /// `GET /automations/:id/events` - the automation's activity: one event
     /// per person it answered, skipped or failed on. Filter by `outcome`
     /// (`"sent"`, `"skipped"`, `"failed"`, `"pending"`, `"queued"`,
-    /// `"opted_out"`, `"waiting"`); `limit` is 1 to 100 (default 25),
+    /// `"opted_out"`, `"waiting"`: Follow first or the tap step of a
+    /// follow-up); `limit` is 1 to 100 (default 25),
     /// `offset` skips. Requires the `automations:read` scope.
     ///
     /// The response is not the plain list envelope: `{"data": [...],
@@ -132,8 +143,20 @@ impl Automations<'_> {
     /// no @handle), `trigger_id`, `trigger_text`, `message` (the DM
     /// sent), `public_reply`, `platform_message_id`, `follow_gate` (Follow
     /// first: `state` `"waiting"` or `"done"`, `asked_at`, `taps`,
-    /// `followed`, `checked`, `after_ask`; else null), `created_at` and
-    /// `sent_at`.
+    /// `followed`, `checked`, `after_ask`, `mode`; else null; `mode` is
+    /// `"follow"`, or `"tap"` for the tap step of a follow-up, which checks
+    /// no follow: `checked` stays false and `followed` is null after the
+    /// tap), `follow_up` (the follow-up of this answer: `state`
+    /// `"scheduled"`, `"sending"`, `"sent"`, `"skipped"` or `"failed"`,
+    /// `due_at`, `sent_at`, `reason`, `reason_label`,
+    /// `platform_message_id`; else null. `reason` only on `skipped` and
+    /// `failed`: `automation_off`, `follow_up_off`, `plan_inactive`,
+    /// `opted_out`, `team_answered`, `window_closed` (the person's last tap
+    /// or message is older than 24 hours minus 15 minutes) or
+    /// `cannot_message` for a skip, the platform's error text or
+    /// `interrupted` (a send that died midway, never sent again) for a
+    /// failure; `reason_label` = the skip in plain words, or the error
+    /// text), `created_at` and `sent_at`.
     pub async fn list_events(
         &self,
         id: &str,
