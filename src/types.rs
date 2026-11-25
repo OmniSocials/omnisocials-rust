@@ -1530,6 +1530,18 @@ pub struct ReplyParams {
     /// and `remaining`. Saves the extra call when working through the inbox.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_next: Option<bool>,
+    /// Facebook comment replies only: when `true`, OmniSocials puts the tag
+    /// `@[<commenter id>]` before `text`, so the reply starts with the
+    /// commenter's name as a clickable link and Facebook notifies them. Do
+    /// not write the name or `@[id]` in `text` yourself. Only on comments on
+    /// the Facebook Page's own posts; any other conversation (other
+    /// platforms, Facebook DMs and mention conversations, a comment with no
+    /// Facebook user id) fails with status 400 and code
+    /// `mention_not_supported`, and nothing is sent. The response then
+    /// carries `mention`: `{ "status", "name", "message" }`, where `status`
+    /// is `"tagged"`, `"plain_name"`, `"failed"` or `"unverified"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mention_author: Option<bool>,
 }
 
 /// Query for `GET /inbox/next`. All fields are optional.

@@ -7,7 +7,7 @@ use omnisocials::{
     AdBudget, AdDraftAd, AdDraftParams, AdDraftPlatform, AdDraftSchedule, AdDraftTargeting,
     AdMediaFile, AdPlacementMedia, BoostPostParams, CheckMediaParams, Content,
     CreateAutomationParams, CreateHashtagSetParams, CreatePostParams, LaunchAdDraftParams,
-    MediaEntry, MediaRefs, UpdateAdCampaignParams, UpdateAutomationParams, UpdateFolderParams,
+    MediaEntry, MediaRefs, ReplyParams, UpdateAdCampaignParams, UpdateAutomationParams, UpdateFolderParams,
     UpdateHashtagSetParams, UpdateMediaParams, UpdatePostParams, UpdateWebhookParams, UserTag,
 };
 use serde_json::{json, Value};
@@ -548,4 +548,24 @@ fn ad_parity_fields_serialize() {
     })
     .unwrap();
     assert_eq!(update, json!({"settings": {"optimization": {"bidding": {"strategy": "cost_cap", "amount": 4.5}}}}));
+}
+
+#[test]
+fn reply_params_send_mention_author_only_when_set() {
+    let params = ReplyParams {
+        text: "Thanks!".into(),
+        message_id: Some("104970331".into()),
+        mention_author: Some(true),
+        ..Default::default()
+    };
+    let value = serde_json::to_value(&params).unwrap();
+    assert_eq!(keys(&value), vec!["mention_author", "message_id", "text"]);
+    assert_eq!(value["mention_author"], json!(true));
+
+    let plain = ReplyParams {
+        text: "Thanks!".into(),
+        ..Default::default()
+    };
+    let value = serde_json::to_value(&plain).unwrap();
+    assert_eq!(keys(&value), vec!["text"]);
 }

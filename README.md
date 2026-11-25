@@ -911,6 +911,28 @@ while !next["data"].is_null() {
 }
 ```
 
+### Tag the commenter on Facebook
+
+On a Facebook comment, pass `mention_author: Some(true)` to `reply` and OmniSocials puts the tag `@[<commenter id>]` before your text: the reply starts with the commenter's name as a clickable link, and Facebook notifies them. Do not write the name or `@[id]` yourself. The answer then carries `mention` with `mention.status`: `tagged` (clickable tag), `plain_name` (Facebook did not accept the tag; the reply was edited to start with "@Name" as plain text), `failed` (the reply can show the raw `@[id]` text: delete it with `delete_message` on `data.id` and send it again without the option) or `unverified` (posted, but not checked). Only comments on the Facebook Page's own posts; any other conversation answers 400 `mention_not_supported` and nothing is sent.
+
+```rust
+let result = client
+    .inbox()
+    .reply(
+        &conversation_id,
+        ReplyParams {
+            text: "Thanks, we ship to Belgium too!".into(),
+            message_id: Some(message_id.clone()),
+            mention_author: Some(true), // Facebook comments only; do not write the name yourself
+            ..Default::default()
+        },
+    )
+    .await?;
+if result["mention"]["status"] != "tagged" {
+    println!("{}", result["mention"]["message"]);
+}
+```
+
 `list_conversations` and `get_messages` are cursor-paginated: read `pagination.next_cursor` from the response and pass it back as `cursor` to fetch the next page, and stop once `pagination.has_more` is `false`.
 
 ### X DM replies use credits
